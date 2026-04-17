@@ -1,7 +1,57 @@
+/**
+ * TopBar (BarraSuperior) - Barra de navegación superior principal
+ * 
+ * @fileoverview Componente de cabecera principal para Mercedes Vitoria OPS.
+ * Contiene controles de búsqueda, tema, idioma, notificaciones y centro de aprobaciones.
+ * 
+ * @description Este componente es responsable de:
+ * - Campo de búsqueda global con filtrado en tiempo real
+ * - Toggle de tema claro/oscuro con persistencia
+ * - Selector de idioma (ES/EN)
+ * - Centro de notificaciones Sileo con animación de campana
+ * - Panel de aprobaciones para solicitudes pendientes
+ * - Botón de instalación PWA (condicional)
+ * 
+ * @requires react - Hooks useState, useEffect, useRef
+ * @requires lucide-react - Iconos vectoriales SVG
+ * @requires sileo - Sistema de notificaciones toast
+ * 
+ * @author Mercedes Vitoria OPS Team
+ * @version 2.0.0
+ * @since 2024-01-15
+ */
+
 import { useEffect, useRef, useState } from "react";
-import { Bell, Download, Moon, Search, Sun } from "lucide-react";
+import { Bell, Download, Moon, Search, Sun, UserCheck, UserX } from "lucide-react";
+import { sileo } from "sileo";
 import { PAGE_COPY, SHELL_COPY } from "../../config/ui-copy.js";
 
+/**
+ * BarraSuperior - Componente de barra superior principal
+ * 
+ * @component
+ * @param {Object} props - Propiedades del componente
+ * @param {string} props.currentPage - Página actual activa para contextualizar el título
+ * @param {boolean} props.installReady - Indica si la PWA está lista para instalarse
+ * @param {string} props.lang - Idioma actual ('es' | 'en')
+ * @param {Array} props.notifications - Lista de notificaciones del sistema
+ * @param {boolean} props.notificationsOpen - Estado del panel de notificaciones
+ * @param {Function} props.onInstall - Callback para instalar la PWA
+ * @param {Function} props.onApproveRequest - Callback para aprobar solicitudes
+ * @param {Function} props.onCloseNotifications - Callback para cerrar panel
+ * @param {Function} props.onDenyRequest - Callback para denegar solicitudes
+ * @param {Function} props.onMarkNotificationsRead - Callback para marcar como leídas
+ * @param {Function} props.onOpenNotifications - Callback para abrir panel
+ * @param {Function} props.onSearchChange - Callback para cambios en búsqueda
+ * @param {Function} props.onToggleLang - Callback para cambiar idioma
+ * @param {Function} props.onToggleTheme - Callback para cambiar tema
+ * @param {Array} props.pendingRequests - Lista de solicitudes pendientes de aprobación
+ * @param {string} props.searchValue - Valor actual del campo de búsqueda
+ * @param {string} props.syncLabel - Etiqueta de estado de sincronización
+ * @param {string} props.theme - Tema actual ('light' | 'dark')
+ * @param {Function} props.onUpdateToasterOffset - Callback para actualizar posición del toaster
+ * @returns {JSX.Element} Barra superior renderizada
+ */
 export default function BarraSuperior({
   currentPage,
   installReady,
@@ -131,6 +181,18 @@ export default function BarraSuperior({
               ref={bellButtonRef}
               className="relative inline-flex h-[52px] w-[52px] items-center justify-center rounded-2xl border border-[#dee2e6] bg-white text-black transition-transform active:scale-95 dark:border-[#2c3440] dark:bg-[#0f141a] dark:text-white"
               onClick={() => {
+                /**
+                 * Handler del click en la campana de notificaciones
+                 * 
+                 * @description Secuencia de acciones al hacer click:
+                 * 1. Actualiza la posición del toaster Sileo para alinearse con la campana
+                 * 2. Activa la animación de swing de la campana (CSS animation)
+                 * 3. Muestra notificación toast con Sileo si hay solicitudes o demo
+                 * 4. Abre el panel de notificaciones
+                 * 5. Marca todas las notificaciones como leídas
+                 */
+                
+                /** Paso 1: Calcular y actualizar offset del toaster para alineación visual */
                 if (bellButtonRef.current && onUpdateToasterOffset) {
                   const rect = bellButtonRef.current.getBoundingClientRect();
                   onUpdateToasterOffset({
@@ -138,15 +200,55 @@ export default function BarraSuperior({
                     right: Math.max(16, Math.round(window.innerWidth - rect.right)),
                   });
                 }
+                
+                /** Paso 2: Activar animación CSS de swing en la campana */
                 setBellRinging(true);
-                // Si no hay notificaciones, forzamos una de prueba para que aparezca el diálogo de aceptar/rechazar
-                if (pendingRequests.length === 0) {
-                  sileo.info({
-                    title: lang === "es" ? "Solicitud de prueba" : "Test request",
-                    description: lang === "es" ? "Abriendo centro de aprobaciones..." : "Opening approval center...",
+                
+                /**
+                 * Paso 3: Mostrar notificación Sileo con animación
+                 * Si hay solicitudes pendientes, muestra el contador.
+                 * Si no hay, muestra mensaje de demostración interactivo.
+                 */
+                if (pendingRequests.length > 0) {
+                  /** Notificación con solicitudes reales pendientes */
+                  sileo.show({
+                    title: lang === "es" 
+                      ? `${pendingRequests.length} solicitud${pendingRequests.length > 1 ? "es" : ""} pendiente${pendingRequests.length > 1 ? "s" : ""}` 
+                      : `${pendingRequests.length} pending request${pendingRequests.length > 1 ? "s" : ""}`,
+                    description: lang === "es" 
+                      ? "Revisa las solicitudes de aprobación de los operarios" 
+                      : "Review operator approval requests",
+                    icon: <UserCheck className="text-emerald-500" size={20} />,
+                    duration: 4000,
+                  });
+                } else {
+                  /**
+                   * Notificación de demostración cuando no hay solicitudes
+                   * Muestra un toast interactivo con acciones de ejemplo
+                   */
+                  sileo.show({
+                    title: lang === "es" ? "Centro de aprobaciones" : "Approval center",
+                    description: lang === "es" 
+                      ? "No hay solicitudes pendientes. El sistema Sileo muestra aquí las peticiones de los operarios." 
+                      : "No pending requests. The Sileo system displays operator requests here.",
+                    icon: <Bell className="text-blue-500" size={20} />,
+                    duration: 5000,
+                    action: {
+                      label: lang === "es" ? "Entendido" : "Got it",
+                      onClick: () => {
+                        sileo.success({
+                          title: lang === "es" ? "Listo" : "Done",
+                          description: lang === "es" ? "Panel de demostración cerrado" : "Demo panel closed",
+                        });
+                      },
+                    },
                   });
                 }
+                
+                /** Paso 4: Abrir el panel desplegable de notificaciones */
                 onOpenNotifications?.();
+                
+                /** Paso 5: Marcar todas las notificaciones como leídas */
                 onMarkNotificationsRead?.();
               }}
               type="button"

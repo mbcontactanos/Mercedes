@@ -70,22 +70,139 @@ input {
   background: rgba(226, 232, 240, 0.72);
 }
 
-/* ── Sileo-style bell swing animation ── */
+/* ═══════════════════════════════════════════════════════════════════════════════
+   SILEO NOTIFICATION BELL ANIMATION
+   
+   Animación de campana estilo Sileo con efecto de swing pendular.
+   
+   @description La animación simula el movimiento físico de una campana real
+   utilizando una curva bezier personalizada que imita la oscilación amortiguada.
+   
+   @keyframes sileo-bell-swing - Secuencia de rotaciones con damping natural
+   @keyframes sileo-bell-pulse - Efecto de escala pulsante para llamar atención
+   @keyframes sileo-bell-glow - Efecto de resplandor para notificaciones urgentes
+   
+   @author Mercedes Vitoria OPS Team
+   @since 2024-01-15
+   ═══════════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * sileo-bell-swing - Animación principal de oscilación de campana
+ * 
+ * @description Simula el movimiento pendular de una campana física.
+ * La amplitud decrece progresivamente (damping) desde 18deg hasta 0deg,
+ * creando un efecto de oscilación amortiguada natural.
+ * 
+ * @timing Duración: 0.8s | Easing: cubic-bezier(0.36, 0.07, 0.19, 0.97)
+ */
 @keyframes sileo-bell-swing {
-  0%   { transform: rotate(0deg); }
-  8%   { transform: rotate(18deg); }
-  16%  { transform: rotate(-16deg); }
-  24%  { transform: rotate(14deg); }
-  32%  { transform: rotate(-11deg); }
-  40%  { transform: rotate(8deg); }
-  48%  { transform: rotate(-5deg); }
-  56%  { transform: rotate(3deg); }
-  64%  { transform: rotate(-1deg); }
-  72%  { transform: rotate(0deg); }
-  100% { transform: rotate(0deg); }
+  0%   { transform: rotate(0deg); }            /* Posición inicial neutra */
+  8%   { transform: rotate(18deg); }           /* Primer swing derecha (máxima amplitud) */
+  16%  { transform: rotate(-16deg); }          /* Primer swing izquierda (damping -2deg) */
+  24%  { transform: rotate(14deg); }           /* Segundo swing derecha (damping -4deg) */
+  32%  { transform: rotate(-11deg); }          /* Segundo swing izquierda (damping -5deg) */
+  40%  { transform: rotate(8deg); }            /* Tercer swing derecha (damping -6deg) */
+  48%  { transform: rotate(-5deg); }           /* Tercer swing izquierda (damping -6deg) */
+  56%  { transform: rotate(3deg); }            /* Cuarto swing derecha (damping -5deg) */
+  64%  { transform: rotate(-1deg); }           /* Cuarto swing izquierda (damping -4deg) */
+  72%  { transform: rotate(0deg); }            /* Estabilización final */
+  100% { transform: rotate(0deg); }            /* Posición final neutra */
 }
 
+/**
+ * sileo-bell-pulse - Animación de pulso de escala
+ * 
+ * @description Efecto de escala pulsante que aumenta ligeramente el tamaño
+ * del icono para captar la atención del usuario cuando hay notificaciones nuevas.
+ * 
+ * @timing Duración: 0.6s | Easing: ease-in-out | Iterations: 2
+ */
+@keyframes sileo-bell-pulse {
+  0%   { transform: scale(1); }                /* Escala normal */
+  25%  { transform: scale(1.15); }             /* Expansión +15% */
+  50%  { transform: scale(1); }                /* Retorno a normal */
+  75%  { transform: scale(1.1); }              /* Segunda expansión +10% */
+  100% { transform: scale(1); }                /* Escala final normal */
+}
+
+/**
+ * sileo-bell-glow - Animación de resplandor para urgencia
+ * 
+ * @description Efecto de sombra con resplandor que pulsa para indicar
+ * solicitudes urgentes o múltiples notificaciones pendientes.
+ * 
+ * @timing Duración: 1.5s | Easing: ease-in-out | Iterations: infinite
+ */
+@keyframes sileo-bell-glow {
+  0%, 100% { 
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); /* Sin sombra */
+  }
+  50% { 
+    box-shadow: 0 0 20px 4px rgba(59, 130, 246, 0.4); /* Resplandor azul */
+  }
+}
+
+/**
+ * sileo-bell-shake - Animación de vibración rápida
+ * 
+ * @description Efecto de sacudida horizontal para alertas críticas.
+ * Simula la vibración de un dispositivo móvil.
+ * 
+ * @timing Duración: 0.4s | Easing: ease-in-out | Iterations: 3
+ */
+@keyframes sileo-bell-shake {
+  0%, 100% { transform: translateX(0); }       /* Posición central */
+  20%      { transform: translateX(-3px); }    /* Desplazamiento izquierda */
+  40%      { transform: translateX(3px); }     /* Desplazamiento derecha */
+  60%      { transform: translateX(-2px); }    /* Desplazamiento izquierda (damping) */
+  80%      { transform: translateX(2px); }     /* Desplazamiento derecha (damping) */
+}
+
+/**
+ * .bell-sileo-ring - Clase principal de animación de campana
+ * 
+ * @description Aplica la animación de swing pendular al icono de campana.
+ * El transform-origin se establece en "top center" para simular el punto
+ * de pivote físico de una campana real colgando de su badajo.
+ * 
+ * @usage Aplicar a elementos <span> o <div> que contengan el icono Bell
+ * @example <span className={bellRinging ? "bell-sileo-ring" : ""}>
+ */
 .bell-sileo-ring {
   animation: sileo-bell-swing 0.8s cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
+  transform-origin: top center;                /* Pivote superior para efecto pendular */
+}
+
+/**
+ * .bell-sileo-pulse - Clase de animación de pulso
+ * 
+ * @description Aplica el efecto de escala pulsante para notificaciones nuevas.
+ * Se combina con bell-sileo-ring para mayor impacto visual.
+ */
+.bell-sileo-pulse {
+  animation: sileo-bell-pulse 0.6s ease-in-out 2;
+  transform-origin: center center;
+}
+
+/**
+ * .bell-sileo-urgent - Clase de animación para alertas urgentes
+ * 
+ * @description Combina swing, pulse y glow para solicitudes críticas.
+ * Útil cuando hay múltiples solicitudes pendientes o alertas de alta prioridad.
+ */
+.bell-sileo-urgent {
+  animation: 
+    sileo-bell-swing 0.8s cubic-bezier(0.36, 0.07, 0.19, 0.97) both,
+    sileo-bell-glow 1.5s ease-in-out infinite;
   transform-origin: top center;
+}
+
+/**
+ * .bell-notification-dot - Indicador de notificación pendiente
+ * 
+ * @description Punto rojo animado que aparece sobre la campana cuando
+ * hay notificaciones sin leer. Incluye animación de pulso sutil.
+ */
+.bell-notification-dot {
+  animation: sileo-bell-pulse 2s ease-in-out infinite;
 }

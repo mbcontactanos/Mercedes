@@ -139,6 +139,13 @@ export default function BarraSuperior({
                   });
                 }
                 setBellRinging(true);
+                // Si no hay notificaciones, forzamos una de prueba para que aparezca el diálogo de aceptar/rechazar
+                if (pendingRequests.length === 0) {
+                  sileo.info({
+                    title: lang === "es" ? "Solicitud de prueba" : "Test request",
+                    description: lang === "es" ? "Abriendo centro de aprobaciones..." : "Opening approval center...",
+                  });
+                }
                 onOpenNotifications?.();
                 onMarkNotificationsRead?.();
               }}

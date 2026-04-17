@@ -1,0 +1,26 @@
+{
+  "name": "Mercedes Vitoria OPS",
+  "short_name": "Mercedes OPS",
+  "description": "PWA operativa para inventario, analisis, registros y camara industrial.",
+  "start_url": "/camara?pwa=1&ngrok-skip-browser-warning=true",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "background_color": "#050816",
+  "theme_color": "#050816",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "/icons/icon-192.svg?ngrok-skip-browser-warning=true",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.svg?ngrok-skip-browser-warning=true",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

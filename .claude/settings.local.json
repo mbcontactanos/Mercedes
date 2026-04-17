@@ -1,0 +1,6 @@
+{
+  "enabledMcpjsonServers": [
+    "insforge"
+  ],
+  "enableAllProjectMcpServers": true
+}

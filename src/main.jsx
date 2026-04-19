@@ -46,13 +46,13 @@ function registerDynamicManifest() {
     theme_color: "#050816",
     icons: [
       {
-        src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='48' fill='%23050816'/%3E%3Ccircle cx='96' cy='96' r='52' fill='none' stroke='white' stroke-width='6'/%3E%3Cpath d='M96 47l10 43-10 6-10-6 10-43zm42 72-37-5-5-11 6-10 36 26zm-80 0 36-26 6 10-5 11-37 5z' fill='white'/%3E%3C/svg%3E",
+        src: "/icons/icon-192.svg",
         sizes: "192x192",
         type: "image/svg+xml",
         purpose: "any maskable",
       },
       {
-        src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='120' fill='%23050816'/%3E%3Ccircle cx='256' cy='256' r='138' fill='none' stroke='white' stroke-width='18'/%3E%3Cpath d='M256 128l26 115-26 17-26-17 26-115zm112 192-96-69 17-26 28 6 51 89zm-224 0 51-89 28-6 17 26-96 69z' fill='white'/%3E%3C/svg%3E",
+        src: "/icons/icon-512.svg",
         sizes: "512x512",
         type: "image/svg+xml",
         purpose: "any maskable",

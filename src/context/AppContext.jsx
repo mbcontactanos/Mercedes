@@ -1,4 +1,4 @@
-import { createContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Peer from "peerjs";
 import { sileo } from "sileo";
 import {
@@ -139,9 +139,10 @@ const INITIAL_MOBILE_OPERATORS = [
   },
 ];
 
-const ADMIN_EMAILS = new Set(["admin@example.com", "mounirbella32@gmail.com"]);
 const N8N_APPROVAL_WEBHOOK_URL = "https://n8n.servidor.dpdns.org/webhook/mercedes-voice-approval";
 const KOKORO_TTS_ENDPOINT = "https://audio.servidor.dpdns.org/v1/audio/speech";
+const NEXTCLOUD_HOST = "https://drive.servidor.dpdns.org";
+const NEXTCLOUD_FOLDER = "/Clase";
 
 function createDatabaseUuid() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -185,6 +186,41 @@ function resolveKokoroEndpoint(voiceEndpoint) {
   }
 
   return voiceEndpoint;
+}
+
+function ApprovalToastContent({ approvalPolicy, detail, lang, onApprove, onDeny, operatorName, requesterRoleLabel }) {
+  return (
+    <div className="space-y-3 text-left">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">{requesterRoleLabel}</p>
+          <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{operatorName}</p>
+        </div>
+        <span className="rounded-full bg-slate-900 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-white dark:bg-white dark:text-black">
+          {approvalPolicy}
+        </span>
+      </div>
+
+      <p className="text-sm leading-6 text-slate-700 dark:text-slate-200">{detail}</p>
+
+      <div className="flex gap-2">
+        <button
+          className="rounded-full bg-black px-3 py-2 text-xs font-semibold text-white dark:bg-white dark:text-black"
+          onClick={onApprove}
+          type="button"
+        >
+          {lang === "es" ? "Aprobar" : "Approve"}
+        </button>
+        <button
+          className="rounded-full border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-900 dark:border-slate-600 dark:text-white"
+          onClick={onDeny}
+          type="button"
+        >
+          {lang === "es" ? "Rechazar" : "Reject"}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function mapApprovalRequest(row, lang) {
@@ -347,8 +383,59 @@ function buildReferenceCatalogSnapshot(rows = []) {
     category: item.category ?? "",
     dimensionsMm: item.dimensionsMm ?? {},
     referenceImages: item.referenceImages ?? [],
+    nextcloudHost: NEXTCLOUD_HOST,
+    nextcloudFolder: NEXTCLOUD_FOLDER,
+    referenceImageUrls: (item.referenceImages ?? []).map(
+      (filename) => `${NEXTCLOUD_HOST}/apps/files/files/176?dir=${encodeURIComponent(NEXTCLOUD_FOLDER)}&openfile=${encodeURIComponent(filename)}`,
+    ),
     visualCues: item.visualCues ?? {},
   }));
+}
+
+function dedupeAdminUsers(rows = []) {
+  const seenKeys = new Set();
+
+  return rows.filter((entry) => {
+    const userIdKey = String(entry.user_id ?? "")
+      .trim()
+      .toLowerCase();
+    const emailKey = String(entry.user_email ?? "")
+      .trim()
+      .toLowerCase();
+    const dedupeKey = userIdKey || emailKey || `user:${entry.user_id}`;
+
+    if (seenKeys.has(dedupeKey)) {
+      return false;
+    }
+
+    seenKeys.add(dedupeKey);
+    return true;
+  });
+}
+
+function mapAdminUserRecord(entry = {}) {
+  const userEmail = String(entry.user_email ?? entry.email ?? "")
+    .trim()
+    .toLowerCase();
+  const fallbackName = userEmail ? userEmail.split("@")[0] : String(entry.user_id ?? "").trim();
+  const resolvedRole = entry.role ?? (entry.is_project_admin ? ROLE_KEYS.ADMIN : ROLE_KEYS.OPERATOR);
+
+  return {
+    ...entry,
+    user_id: String(entry.user_id ?? entry.id ?? "").trim(),
+    display_name: String(entry.display_name ?? "").trim() || fallbackName,
+    role: normalizeRole(resolvedRole),
+    supervision_level:
+      String(entry.supervision_level ?? "").trim() ||
+      (resolvedRole === ROLE_KEYS.ADMIN ? "full" : "standard"),
+    assigned_operator_id: String(entry.assigned_operator_id ?? "").trim(),
+    user_email: userEmail,
+    disabled: Boolean(entry.disabled),
+    email_verified: Boolean(entry.email_verified),
+    has_profile: Boolean(entry.has_profile),
+    created_at: entry.created_at ?? null,
+    updated_at: entry.updated_at ?? null,
+  };
 }
 
 function resolveInventoryItemFromPrompt(prompt, inventoryRows = []) {
@@ -547,7 +634,7 @@ async function notifyN8nApprovalWorkflow(payload) {
     const text = await response.text();
     return text ? { assistantAnswer: text, kokoroText: text } : null;
   } catch {
-    // n8n notification is best-effort and should not block the operator flow.
+    // La notificación a n8n es "best-effort" y no debe bloquear el flujo del operario.
     return null;
   }
 }
@@ -555,39 +642,36 @@ async function notifyN8nApprovalWorkflow(payload) {
 /**
  * playWorkflowAudioIfAvailable
  *
- * Attempts to play text-to-speech audio based on the n8n workflow response.
+ * Intenta reproducir audio TTS a partir de la respuesta del workflow de n8n.
  *
- * ## Audio Resolution Priority ##
+ * ## Prioridad de resolución de audio ##
  *
- * 1. Pre-built audio URL: If the workflow response contains `audioUrl`, `audio_url`,
- *    `audioBase64`, or `audio`, the audio is played directly without a TTS synthesis call.
+ * 1. URL de audio ya generada: si la respuesta trae `audioUrl`, `audio_url`,
+ *    `audioBase64` o `audio`, se reproduce directamente sin sintetizar.
  *
- * 2. Kokoro TTS synthesis: If the workflow returns a `kokoroText` field (plain Spanish text),
- *    this function POSTs to the Kokoro endpoint:
+ * 2. Síntesis Kokoro TTS: si llega `kokoroText`, hace POST al endpoint Kokoro:
  *      POST https://audio.servidor.dpdns.org/v1/audio/speech
  *      Body: { model, input, voice, response_format, stream, lang_code }
- *      Response: raw audio/mpeg or a JSON wrapper with a downloadable URL.
+ *      Respuesta: audio/mpeg binario o JSON con URL de descarga.
  *
- *    The FastKoko server exposes an OpenAI-compatible TTS API. The `/web` path is only
- *    the player UI, not the synthesis endpoint.
+ *    El servidor FastKoko expone API TTS compatible con OpenAI. La ruta `/web`
+ *    es solo interfaz de reproductor, no endpoint de síntesis.
  *
- * ## Image Context (captureUrl) ##
+ * ## Contexto visual (captureUrl) ##
  *
- * The workflow response may also include `captureUrl` — a URL to the JPEG frame captured
- * by the mobile operator's camera at the time of the request. This is used by the admin panel
- * and the n8n "Normalize Request" node to enrich the visual detection context. It is NOT
- * played as audio but is passed to image analysis.
+ * La respuesta puede incluir `captureUrl`, URL del frame JPEG capturado por la
+ * cámara del operario. Se usa para enriquecer análisis visual, no para audio.
  *
- * @param {object|null} workflowResponse - Parsed JSON from the n8n webhook response
- * @returns {Promise<boolean>} - true if audio was successfully played
+ * @param {object|null} workflowResponse - JSON parseado desde el webhook de n8n
+ * @returns {Promise<boolean>} - true si el audio se reprodujo correctamente
  */
 async function playWorkflowAudioIfAvailable(workflowResponse) {
   if (typeof window === "undefined" || !workflowResponse) {
     return false;
   }
 
-  // ── Step 1: Check for pre-built audio URL in the workflow response ────────
-  // These fields indicate the workflow already produced a synthesized audio file.
+  // ── Paso 1: comprobar audio ya generado por el workflow ────────────────────
+  // Estos campos indican que el workflow ya devolvió un audio sintetizado.
   const prebuiltAudioUrl =
     workflowResponse.audioUrl ??
     workflowResponse.audio_url ??
@@ -600,24 +684,23 @@ async function playWorkflowAudioIfAvailable(workflowResponse) {
       await audioEl.play();
       return true;
     } catch {
-      // Pre-built audio failed — fall through to Kokoro TTS synthesis
+      // Si falla el audio preconstruido, continúa con síntesis Kokoro.
     }
   }
 
-  // ── Step 2: Kokoro TTS synthesis ──────────────────────────────────────────
-  // The n8n workflow's Auto Response / Escalation nodes emit a `kokoroText` field
-  // containing the plain-text Spanish string that should be synthesized into speech.
-  // We POST this to the self-hosted Kokoro TTS endpoint and play the result.
+  // ── Paso 2: síntesis Kokoro TTS ───────────────────────────────────────────
+  // Los nodos de Auto Response / Escalation envían `kokoroText` con texto plano.
+  // Se hace POST al endpoint Kokoro autoalojado y se reproduce el resultado.
   const kokoroText = workflowResponse.kokoroText ?? workflowResponse.assistantAnswer;
   const kokoroEndpoint = resolveKokoroEndpoint(workflowResponse.voiceEndpoint);
+  const responseLang = workflowResponse.lang ?? workflowResponse.requesterLang ?? "es";
 
   if (!kokoroText || typeof Audio === "undefined") {
     return false;
   }
 
-  // Use an AbortController to enforce an 8-second timeout on the TTS request.
-  // Without a timeout, a slow or unavailable Kokoro server would leave the UI
-  // hanging indefinitely while waiting for the audio response.
+  // Usa AbortController para imponer timeout de 8 s en la petición TTS.
+  // Sin timeout, un servidor Kokoro lento podría dejar la UI bloqueada.
   const abortController = new AbortController();
   const timeoutHandle = setTimeout(() => abortController.abort(), 8000);
 
@@ -635,7 +718,7 @@ async function playWorkflowAudioIfAvailable(workflowResponse) {
         response_format: "mp3",
         stream: false,
         return_download_link: true,
-        lang_code: lang === "es" ? "e" : "a",
+        lang_code: responseLang === "es" ? "e" : "a",
       }),
       signal: abortController.signal,
     });
@@ -651,7 +734,7 @@ async function playWorkflowAudioIfAvailable(workflowResponse) {
     let audioPlayUrl = null;
 
     if (contentType.includes("application/json")) {
-      // Kokoro returned a JSON wrapper — extract the URL field
+      // Kokoro devolvió un contenedor JSON: extraer la URL de audio.
       const ttsJson = await ttsResponse.json();
       audioPlayUrl =
         ttsJson.audioUrl ??
@@ -663,7 +746,7 @@ async function playWorkflowAudioIfAvailable(workflowResponse) {
       contentType.includes("audio/") ||
       contentType.includes("application/octet-stream")
     ) {
-      // Kokoro returned raw binary audio — convert to a Blob URL for playback
+      // Kokoro devolvió audio binario: convertirlo a Blob URL para reproducir.
       const audioBinary = await ttsResponse.arrayBuffer();
       const mimeType = contentType.includes("audio/") ? contentType.split(";")[0] : "audio/mpeg";
       audioPlayUrl = URL.createObjectURL(new Blob([audioBinary], { type: mimeType }));
@@ -672,7 +755,7 @@ async function playWorkflowAudioIfAvailable(workflowResponse) {
     if (audioPlayUrl) {
       const audioEl = new Audio(audioPlayUrl);
       await audioEl.play();
-      // Revoke the Blob URL after playback to free memory
+      // Libera la Blob URL tras reproducir para evitar consumo de memoria.
       audioEl.addEventListener("ended", () => {
         if (audioPlayUrl.startsWith("blob:")) {
           URL.revokeObjectURL(audioPlayUrl);
@@ -683,8 +766,8 @@ async function playWorkflowAudioIfAvailable(workflowResponse) {
 
     return false;
   } catch {
-    // TTS request timed out, network error, or audio play blocked by browser policy.
-    // This is best-effort: the text response is already shown in the chat UI.
+    // Timeout de TTS, error de red o bloqueo de reproducción por política del navegador.
+    // Es best-effort: el texto ya está visible en la UI del chat.
     clearTimeout(timeoutHandle);
     return false;
   }
@@ -737,6 +820,61 @@ export function AppProvider({ children }) {
   const normalizedRole = normalizeRole(profile?.role);
   const roleConfig = ROLE_DEFINITIONS[normalizedRole];
 
+  const showApprovalToast = useCallback((request, reason = "manual") => {
+    if (!request) {
+      return;
+    }
+
+    const dismissAfterAction = async (action) => {
+      if (action === "approve") {
+        await approveRequestRef.current?.(request.id);
+      } else {
+        await denyRequestRef.current?.(request.id);
+      }
+    };
+
+    sileo.action({
+      title: lang === "es" ? "Centro de aprobaciones" : "Approval center",
+      description: (
+        <ApprovalToastContent
+          approvalPolicy={request.approvalPolicy}
+          detail={request.transcript || request.detail}
+          lang={lang}
+          onApprove={() => void dismissAfterAction("approve")}
+          onDeny={() => void dismissAfterAction("deny")}
+          operatorName={request.operatorName}
+          requesterRoleLabel={request.requesterRoleLabel ?? request.approvalPolicy}
+        />
+      ),
+      duration: 3000,
+      fill: theme === "dark" ? "#11161d" : "#ffffff",
+      roundness: 24,
+      autopilot: false,
+    });
+  }, [lang, theme]);
+
+  const openNotificationsCenter = useCallback(() => {
+    setNotificationsOpen(true);
+
+    if (!pendingRequests.length) {
+      sileo.info({
+        title: lang === "es" ? "Centro de aprobaciones" : "Approval center",
+        description: lang === "es" ? "No hay solicitudes pendientes." : "No pending requests.",
+        duration: 3000,
+        fill: theme === "dark" ? "#11161d" : "#ffffff",
+        roundness: 24,
+      });
+      setNotificationsOpen(false);
+      return;
+    }
+
+    pendingRequests.slice(0, 2).forEach((request) => {
+      showApprovalToast(request);
+    });
+
+    setNotificationsOpen(false);
+  }, [lang, pendingRequests, showApprovalToast, theme]);
+
   useEffect(() => {
     if (!profile?.user_id) {
       return;
@@ -755,7 +893,7 @@ export function AppProvider({ children }) {
         setMessages(parsedMemory.messages);
       }
     } catch {
-      // Ignore corrupted persisted session memory.
+      // Ignora memoria de sesión persistida si está corrupta.
     }
   }, [profile?.user_id]);
 
@@ -790,18 +928,23 @@ export function AppProvider({ children }) {
       return;
     }
 
-    const { data } = await insforge.database
+    // Importante: leer solo perfiles del proyecto desde user_profiles.
+    // Evita mezclar usuarios externos que pueden aparecer en RPC globales.
+    const response = await insforge.database
       .from("user_profiles")
       .select("*")
       .order("created_at", { ascending: false });
 
-    if (data) {
+    if (response.data) {
       setAdminUsers(
-        data.map((entry) => ({
-          ...entry,
-          role: normalizeRole(entry.role),
-          user_email: entry.user_email ?? "",
-        })),
+        dedupeAdminUsers(
+          response.data.map((entry) =>
+            mapAdminUserRecord({
+              ...entry,
+              has_profile: true,
+            }),
+          ),
+        ),
       );
     }
   };
@@ -876,11 +1019,7 @@ export function AppProvider({ children }) {
       .maybeSingle();
 
     if (existingProfile) {
-      const forcedRole = ADMIN_EMAILS.has(currentUser.email ?? "")
-        ? ROLE_KEYS.ADMIN
-        : normalizeRole(existingProfile.role);
       const shouldRefreshProfile =
-        existingProfile.role !== forcedRole ||
         existingProfile.user_email !== (currentUser.email ?? "") ||
         !existingProfile.display_name;
 
@@ -894,9 +1033,6 @@ export function AppProvider({ children }) {
               currentUser.profile?.name ??
               currentUser.email?.split("@")[0] ??
               "Operario",
-            role: forcedRole,
-            supervision_level:
-              forcedRole === ROLE_KEYS.ADMIN ? "full" : existingProfile.supervision_level ?? "standard",
             user_email: currentUser.email ?? existingProfile.user_email ?? "",
           })
           .eq("user_id", currentUser.id)
@@ -913,7 +1049,7 @@ export function AppProvider({ children }) {
 
       const normalizedProfile = {
         ...existingProfile,
-        role: forcedRole,
+        role: normalizeRole(existingProfile.role),
         user_email: currentUser.email ?? existingProfile.user_email ?? "",
       };
       setProfile(normalizedProfile);
@@ -922,47 +1058,15 @@ export function AppProvider({ children }) {
       return normalizedProfile;
     }
 
-    if (!ADMIN_EMAILS.has(currentUser.email ?? "")) {
-      await insforge.auth.signOut();
-      setUser(null);
-      setProfile(null);
-      setAuthError(
-        lang === "es"
-          ? "Tu usuario no esta autorizado en el panel. Pide al admin que lo cree de nuevo."
-          : "Your user is not authorized in the panel. Ask the admin to recreate it.",
-      );
-      return null;
-    }
-
-    const nextProfile = {
-      user_id: currentUser.id,
-      display_name: preferredName ?? currentUser.profile?.name ?? currentUser.email?.split("@")[0] ?? "Operario",
-      role: ROLE_KEYS.ADMIN,
-      preferred_lang: window.localStorage.getItem("mercedes-lang") ?? "es",
-      theme: window.localStorage.getItem("mercedes-theme") ?? "light",
-      user_email: currentUser.email ?? "",
-    };
-
-    const { data } = await insforge.database.from("user_profiles").insert(nextProfile).select().maybeSingle();
-
-    if (data) {
-      setProfile({
-        ...data,
-        role: normalizeRole(data.role),
-        user_email: data.user_email ?? currentUser.email ?? "",
-      });
-    } else {
-      setProfile(nextProfile);
-    }
-
-    if (preferredName) {
-      await insforge.auth.setProfile({ name: preferredName });
-    }
-
-    return {
-      ...(data ?? nextProfile),
-      role: normalizeRole((data ?? nextProfile).role),
-    };
+    await insforge.auth.signOut();
+    setUser(null);
+    setProfile(null);
+    setAuthError(
+      lang === "es"
+        ? "Tu usuario no esta autorizado en el panel. Pide al admin que lo cree desde Ajustes."
+        : "Your user is not authorized in the panel. Ask admin to create it from Settings.",
+    );
+    return null;
   };
 
   useEffect(() => {
@@ -1052,7 +1156,7 @@ export function AppProvider({ children }) {
       if (nextTopRequestId && nextTopRequestId !== latestPendingToastRef.current) {
         const latest = nextRequests[0];
         addNotification(latest.title, latest.detail);
-        setNotificationsOpen(true);
+        showApprovalToast(latest, "incoming");
         latestPendingToastRef.current = nextTopRequestId;
       }
 
@@ -1068,7 +1172,7 @@ export function AppProvider({ children }) {
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [lang, normalizedRole, user]);
+  }, [lang, normalizedRole, showApprovalToast, theme, user]);
 
   useEffect(() => {
     const handleResize = () => {
@@ -1373,7 +1477,7 @@ export function AppProvider({ children }) {
         category: "approval",
       });
     } catch {
-      // Requests should not fail if logging is unavailable.
+      // Las solicitudes no deben fallar si el sistema de logs no está disponible.
     }
   };
 
@@ -1444,15 +1548,15 @@ export function AppProvider({ children }) {
       statusMessage,
     });
 
-    // ── Build the most recent camera capture URL for visual context ──────────
-    // The n8n "Normalize Request" node uses captureUrl/imageUrl to detect whether
-    // the query is visual (visualRequest=true) and embed a camera frame description
-    // into the Groq AI system prompt. Without this field the AI cannot see images.
+    // ── Construye la URL de captura de cámara más reciente para contexto visual ─
+    // El nodo "Normalize Request" de n8n usa captureUrl/imageUrl para detectar si
+    // la consulta es visual (visualRequest=true) y enriquecer el prompt del modelo.
+    // Sin este campo, la IA no puede analizar imágenes.
     //
-    // Priority:
-    //   1. Most recent detection's sourceImageUrl (set by TensorFlow in AdminMonitoringPanel)
-    //   2. Most recent operatorStream's captureFrame (base64 canvas grab)
-    //   3. Empty string (text-only request)
+    // Prioridad:
+    //   1. sourceImageUrl de la detección más reciente (TensorFlow en panel admin)
+    //   2. captureFrame del stream más reciente del operario (captura base64)
+    //   3. Cadena vacía (consulta solo texto)
     const latestDetection = detections[0];
     const latestCaptureUrl =
       latestDetection?.sourceImageUrl ??
@@ -1468,7 +1572,7 @@ export function AppProvider({ children }) {
       assignedOperatorId,
       transcript,
       detail,
-      // imageUrl: aliased as captureUrl in the workflow — both are accepted by Normalize Request
+      // imageUrl y captureUrl son alias válidos para el nodo Normalize Request.
       imageUrl: latestCaptureUrl,
       captureUrl: latestCaptureUrl,
       approvalPolicy: roleConfig.approvalPolicy,
@@ -1500,8 +1604,8 @@ export function AppProvider({ children }) {
       agentProfileKey: agentProfile.key,
       agentProfileName: agentProfile.name[lang] ?? agentProfile.name.es,
       llm: "groq",
-      // Kokoro TTS endpoint — workflow will embed in response as voiceEndpoint so the
-      // playWorkflowAudioIfAvailable function can use it for TTS synthesis
+      // Endpoint Kokoro TTS: el workflow lo devuelve como voiceEndpoint para que
+      // playWorkflowAudioIfAvailable lo use durante la síntesis.
       voiceEndpoint: "https://audio.servidor.dpdns.org/web",
     });
 
@@ -1701,7 +1805,7 @@ export function AppProvider({ children }) {
     }
   };
 
-  const handleVoiceCapture = () => {
+  const handleVoiceCapture = async () => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
@@ -1709,42 +1813,69 @@ export function AppProvider({ children }) {
       return;
     }
 
+    if (isListening && recognitionRef.current) {
+      recognitionRef.current.stop();
+      return;
+    }
+
+    if (navigator.mediaDevices?.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach((track) => track.stop());
+      } catch {
+        setStatusMessage(lang === "es" ? "No se ha concedido acceso al microfono" : "Microphone access was not granted");
+        return;
+      }
+    }
+
     const recognition = new SpeechRecognition();
-    recognition.lang = lang === "es" ? "es-ES" : "en-US";
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-    recognition.onstart = () => setIsListening(true);
-    recognition.onend = () => setIsListening(false);
-    recognition.onerror = () => {
-      setIsListening(false);
-      setStatusMessage(lang === "es" ? "No se pudo capturar la voz" : "Voice capture failed");
-    };
-    recognition.onresult = (event) => {
-      const transcript = event.results[0][0].transcript || "Resumen de stock";
-      const cleanedTranscript = transcript.trim();
-      const { agentProfile, intent, requiresApproval } = buildAssistantContext(cleanedTranscript);
+    let finalTranscript = "";
+    let partialTranscript = "";
+    let requestSent = false;
+
+    const submitTranscript = (rawTranscript) => {
+      const transcript = rawTranscript.trim() || "Resumen de stock";
+      const { cleanedTranscript, commandTranscript, wakeWordDetected } = normalizeWakeWordTranscript(transcript);
+      const effectiveTranscript = wakeWordDetected ? commandTranscript : cleanedTranscript;
+
+      if (wakeWordDetected && !commandTranscript) {
+        setStatusMessage(
+          lang === "es" ? "Omar activado. Indica ahora la consulta completa." : "Omar activated. Say the full request now.",
+        );
+        return;
+      }
+
+      if (!effectiveTranscript || requestSent) {
+        if (!effectiveTranscript) {
+          setStatusMessage(lang === "es" ? "No se ha detectado una consulta valida." : "No valid request was detected.");
+        }
+        return;
+      }
+
+      requestSent = true;
+      const { agentProfile, intent, requiresApproval } = buildAssistantContext(effectiveTranscript);
       const voiceUserMessage = {
         id: `voice-user-${Date.now()}`,
         role: "user",
-        content: cleanedTranscript,
+        content: effectiveTranscript,
       };
 
       setMessages((currentMessages) => [...currentMessages, voiceUserMessage]);
-      setInputValue(cleanedTranscript);
+      setInputValue(effectiveTranscript);
       setStatusMessage(lang === "es" ? "Enviando audio al workflow..." : "Sending audio to the workflow...");
 
       void (async () => {
         const workflowResult = await sendAssistantEventToWorkflow({
-          detail: cleanedTranscript,
+          detail: effectiveTranscript,
           messageType: "voice",
           requestType: intent.workflowType,
-          transcript: cleanedTranscript,
+          transcript: effectiveTranscript,
         });
         const workflowAnswer = workflowResult?.workflowResponse?.assistantAnswer?.trim();
         const inventoryReply = buildRealtimeInventoryReply({
           item: workflowResult?.resolvedInventoryItem ?? null,
           lang,
-          prompt: cleanedTranscript,
+          prompt: effectiveTranscript,
           role: normalizedRole,
           summary: workflowResult?.workflowResponse?.warehouseSummary ?? {
             totalReferences: workflowResult?.inventorySnapshot?.length ?? inventoryItems.length,
@@ -1771,7 +1902,7 @@ export function AppProvider({ children }) {
               inventoryItems,
               lang,
               messages: [...messages, voiceUserMessage],
-              prompt: cleanedTranscript,
+              prompt: effectiveTranscript,
               role: normalizedRole,
             }),
           agentProfileKey: agentProfile.key,
@@ -1794,12 +1925,59 @@ export function AppProvider({ children }) {
         void createApprovalRequest({
           detail:
             lang === "es"
-              ? `${profile?.display_name ?? "Operario"} ha lanzado una consulta de voz sensible: ${cleanedTranscript}`
-              : `${profile?.display_name ?? "Operator"} sent a sensitive voice request: ${cleanedTranscript}`,
+              ? `${profile?.display_name ?? "Operario"} ha lanzado una consulta de voz sensible: ${effectiveTranscript}`
+              : `${profile?.display_name ?? "Operator"} sent a sensitive voice request: ${effectiveTranscript}`,
           requestType: intent.workflowType,
-          transcript: cleanedTranscript,
+          transcript: effectiveTranscript,
         });
       }
+    };
+
+    recognition.lang = lang === "es" ? "es-ES" : "en-US";
+    recognition.continuous = false;
+    recognition.interimResults = true;
+    recognition.maxAlternatives = 1;
+    recognition.onstart = () => setIsListening(true);
+    recognition.onend = () => {
+      setIsListening(false);
+      recognitionRef.current = null;
+
+      if (!requestSent) {
+        submitTranscript(finalTranscript || partialTranscript);
+      }
+    };
+    recognition.onresult = (event) => {
+      const segments = [];
+
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const chunk = event.results[index]?.[0]?.transcript?.trim();
+        if (!chunk) {
+          continue;
+        }
+
+        if (event.results[index].isFinal) {
+          segments.push(chunk);
+        } else {
+          partialTranscript = chunk;
+        }
+      }
+
+      if (segments.length) {
+        finalTranscript = `${finalTranscript} ${segments.join(" ")}`.trim();
+      }
+    };
+    recognition.onerror = (event) => {
+      setIsListening(false);
+      recognitionRef.current = null;
+      setStatusMessage(
+        event?.error === "not-allowed"
+          ? lang === "es"
+            ? "El navegador ha bloqueado el microfono"
+            : "The browser blocked microphone access"
+          : lang === "es"
+            ? "No se pudo capturar la voz"
+            : "Voice capture failed",
+      );
     };
 
     recognitionRef.current = recognition;
@@ -1817,7 +1995,18 @@ export function AppProvider({ children }) {
 
     if (error) {
       setAuthBusy(false);
-      setAuthError(error.message ?? "No se pudo iniciar sesion");
+      const rawMessage = String(error.message ?? "");
+      const timeoutError =
+        rawMessage.toLowerCase().includes("timed out") ||
+        rawMessage.toLowerCase().includes("timeout") ||
+        rawMessage.includes("30000ms");
+      setAuthError(
+        timeoutError
+          ? lang === "es"
+            ? "No se pudo conectar con el servidor de autenticacion. Revisa VITE_INSFORGE_BASE_URL y la red."
+            : "Could not reach the authentication server. Check VITE_INSFORGE_BASE_URL and network."
+          : error.message ?? "No se pudo iniciar sesion",
+      );
       return { ok: false };
     }
 
@@ -1857,14 +2046,14 @@ export function AppProvider({ children }) {
     }
 
     const payload = {
+      user_id: userId,
       ...updates,
       updated_at: new Date().toISOString(),
     };
 
     const { data, error } = await insforge.database
       .from("user_profiles")
-      .update(payload)
-      .eq("user_id", userId)
+      .upsert(payload, { onConflict: "user_id" })
       .select()
       .maybeSingle();
 
@@ -1875,11 +2064,11 @@ export function AppProvider({ children }) {
     setAdminUsers((currentUsers) =>
       currentUsers.map((entry) =>
         entry.user_id === userId
-          ? {
+          ? mapAdminUserRecord({
               ...entry,
               ...(data ?? payload),
-              role: normalizeRole(data?.role ?? payload.role ?? entry.role),
-            }
+              has_profile: true,
+            })
           : entry,
       ),
     );
@@ -1962,6 +2151,8 @@ export function AppProvider({ children }) {
     const createdProfile = {
       ...(data ?? upsertPayload),
       role: normalizeRole((data ?? upsertPayload).role),
+      has_profile: true,
+      email_verified: false,
     };
 
     setAdminUsers((currentUsers) => [createdProfile, ...currentUsers.filter((entry) => entry.user_id !== userId)]);
@@ -1976,28 +2167,17 @@ export function AppProvider({ children }) {
       return { ok: false, error: "forbidden" };
     }
 
-    const { data: profileToDelete } = await insforge.database
-      .from("user_profiles")
-      .select("*")
-      .eq("user_id", userId)
-      .maybeSingle();
-
-    const { error } = await insforge.database
-      .from("user_profiles")
-      .delete()
-      .eq("user_id", userId);
+    const { data, error } = await insforge.database.rpc("admin_delete_user", {
+      target_user_id: userId,
+    });
 
     if (error) {
       return { ok: false, error: error.message ?? "delete_failed" };
     }
 
-    await insforge.database.from("approval_requests").delete().eq("requester_user_id", userId);
-
-    if (profileToDelete?.assigned_operator_id) {
-      await insforge.database
-        .from("approval_requests")
-        .delete()
-        .eq("assigned_operator_id", profileToDelete.assigned_operator_id);
+    if (!data?.deleted) {
+      await refreshAdminUsers(profile);
+      return { ok: false, error: "delete_not_applied" };
     }
 
     setAdminUsers((currentUsers) => currentUsers.filter((entry) => entry.user_id !== userId));
@@ -2046,6 +2226,7 @@ export function AppProvider({ children }) {
       description: request.operatorName,
     });
     setPendingRequests((currentRequests) => currentRequests.filter((item) => item.id !== requestId));
+    setNotificationsOpen(false);
   };
 
   const handleDenyRequest = async (requestId) => {
@@ -2077,12 +2258,19 @@ export function AppProvider({ children }) {
       description: request.operatorName,
     });
     setPendingRequests((currentRequests) => currentRequests.filter((item) => item.id !== requestId));
+    setNotificationsOpen(false);
   };
 
   useEffect(() => {
     approveRequestRef.current = handleApproveRequest;
     denyRequestRef.current = handleDenyRequest;
   }, [handleApproveRequest, handleDenyRequest]);
+
+  useEffect(() => {
+    if (!pendingRequests.length) {
+      latestPendingToastRef.current = "";
+    }
+  }, [pendingRequests]);
 
   const value = {
     activityFilter,
@@ -2115,13 +2303,16 @@ export function AppProvider({ children }) {
     mobileOperators,
     notificationItems,
     notificationsOpen,
-    onCloseNotifications: () => setNotificationsOpen(false),
+    onCloseNotifications: () => {
+      setNotificationsOpen(false);
+      sileo.clear("top-right");
+    },
     onInputChange: setInputValue,
     onMarkNotificationsRead: () =>
       setNotificationItems((currentNotifications) =>
         currentNotifications.map((notification) => ({ ...notification, read: true })),
       ),
-    onOpenNotifications: () => setNotificationsOpen(true),
+    onOpenNotifications: openNotificationsCenter,
     onSearchChange: setSearchValue,
     onSelectFilter: setSelectedFilter,
     onSetInventoryView: setInventoryView,

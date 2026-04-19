@@ -5,38 +5,33 @@ import { Toaster } from "sileo";
 import { AppProvider } from "./context/AppContext.jsx";
 import { useAppContext } from "./context/useAppContext.js";
 
-// ─── Page Imports ───────────────────────────────────────────────────────────
-// IMPORTANT: Page directories use English names. Previously these imported
-// from non-existent Spanish paths (acceso, ajustes, analisis, camara,
-// inventario, registros) which caused Vite MODULE_NOT_FOUND errors at runtime.
-// The correct English directory names are used below.
-import PaginaAcceso from "./pages/auth/page.jsx";         // Login / auth gate
-import AjustesPage from "./pages/settings/page.jsx";      // Admin user & role management
-import AnalisisPage from "./pages/analysis/page.jsx";     // TF.js detection analytics
-import PaginaCamara from "./pages/camera/page.jsx";       // Mobile operator camera console
-import PaginaInicio from "./pages/home/page.jsx";         // Dashboard home (admin only)
-import InventarioPage from "./pages/inventory/page.jsx";  // Parts inventory tracker
-import RegistrosPage from "./pages/logs/page.jsx";        // System event logs
+// ─── Importación de páginas ──────────────────────────────────────────────────
+// Las carpetas usan nombres en inglés y deben coincidir exactamente con las rutas reales.
+import PaginaAcceso from "./pages/auth/page.jsx";         // Pantalla de acceso/autenticación
+import AjustesPage from "./pages/settings/page.jsx";      // Gestión administrativa de usuarios/roles
+import PaginaCamara from "./pages/camera/page.jsx";       // Consola de cámara para operarios
+import PaginaInicio from "./pages/home/page.jsx";         // Inicio del panel (solo admin)
+import InventarioPage from "./pages/inventory/page.jsx";  // Gestión de inventario de piezas
+import RegistrosPage from "./pages/logs/page.jsx";        // Visor de registros del sistema
+import PiecesPage from "./pages/pieces/page.jsx";         // Biblioteca visual de piezas
 
-// ─── Shell & Route Guards ────────────────────────────────────────────────────
-// AppShell: Persistent layout wrapper (sidebar navigation, top bar, toaster)
-// ProtectedRoute: Auth guard that redirects unauthenticated users to /login
+// ─── Shell y guardas de ruta ────────────────────────────────────────────────
+// AppShell: layout persistente (sidebar, topbar, notificaciones)
+// ProtectedRoute: guarda de autenticación que redirige a /login
 import AppShell from "./routes/AppShell.jsx";
 import ProtectedRoute from "./routes/ProtectedRoute.jsx";
 
-// ─── Global CSS ─────────────────────────────────────────────────────────────
+// ─── Estilos globales ────────────────────────────────────────────────────────
 import "./index.css";
 
 /**
  * registerDynamicManifest
  *
- * Generates a PWA Web App Manifest dynamically at runtime and injects it as a
- * <link rel="manifest"> in the document <head>. Using a programmatic manifest
- * (Blob URL) avoids the need for a static manifest.webmanifest file and lets
- * us embed SVG icons inline without additional server round-trips.
+ * Genera dinámicamente el manifest PWA en tiempo de ejecución y lo inyecta
+ * como <link rel="manifest"> en el <head>. Al usar Blob URL evitamos depender
+ * de un archivo estático y podemos incluir iconos SVG inline.
  *
- * The start_url points to /camera?pwa=1 so that when the PWA is opened from
- * the device home screen, the mobile operator camera console loads immediately.
+ * start_url apunta a /camera?pwa=1 para abrir directamente la consola móvil.
  */
 function registerDynamicManifest() {
   const manifest = {
@@ -65,11 +60,11 @@ function registerDynamicManifest() {
     ],
   };
 
-  // Convert manifest object to a Blob URL so it can be used as a link href
+  // Convierte el objeto manifest a Blob URL para usarlo como href.
   const manifestBlob = new Blob([JSON.stringify(manifest)], { type: "application/manifest+json" });
   const manifestUrl = URL.createObjectURL(manifestBlob);
 
-  // Inject or replace the existing <link rel="manifest"> element
+  // Inserta o reemplaza el enlace <link rel="manifest"> existente.
   let manifestLink = document.querySelector("link[rel='manifest']");
 
   if (!manifestLink) {
@@ -82,70 +77,66 @@ function registerDynamicManifest() {
 }
 
 /**
- * AplicacionRaiz (Root Application Component)
+ * AplicacionRaiz (componente raíz)
  *
- * Renders the top-level router and injects the Sileo Toaster notification
- * system. The Toaster position and theme are managed by AppContext so that
- * notifications correctly appear above/below the mobile bottom bar.
+ * Renderiza el router principal e inyecta el sistema de toasts de Sileo.
+ * La posición y el tema del toaster se controlan desde AppContext.
  *
- * Route structure:
- *  /login                → AuthPage (public, no auth required)
+ * Estructura de rutas:
+ *  /login                → acceso público
  *  / (ProtectedRoute)
  *    / (AppShell)
- *      /                 → PaginaInicio  – Admin dashboard home
- *      /inventory        → InventarioPage – Parts & stock tracker
- *      /analysis         → AnalisisPage  – TF.js camera analysis view
- *      /logs             → RegistrosPage – System log viewer
- *      /camera           → PaginaCamara  – Mobile camera console
- *      /settings         → AjustesPage   – User / role management (admin only)
- *  *                     → Navigate to /  – 404 catch-all
+ *      /                 → inicio
+ *      /inventory        → inventario
+ *      /logs             → registros
+ *      /camera           → cámara
+ *      /settings         → ajustes (solo admin)
+ *  *                     → redirección a /
  *
- * NOTE: AppShell enforces role-based access internally. Non-admin users are
- * automatically redirected from all pages to /camera.
+ * Nota: AppShell aplica control de acceso por rol.
  */
 function AplicacionRaiz() {
-  // Retrieve theme and toaster positioning offset from global app state
+  // Obtiene tema y desplazamiento del toaster desde estado global.
   const { theme, toasterOffset } = useAppContext();
 
-  // Invert toaster theme so it contrasts with the current app color scheme
-  // (light app → dark toasts, dark app → light toasts)
+  // Invierte el tema del toaster para mantener contraste visual.
   const toasterTheme = theme === "light" ? "dark" : "light";
 
   return (
     <>
-      {/* Global notification toaster — managed by sileo, offset by AppContext */}
+      {/* Toaster global de notificaciones, gestionado por AppContext */}
       <Toaster offset={toasterOffset} position="top-right" theme={toasterTheme} />
 
       <BrowserRouter>
         <Routes>
-          {/* Public login route — accessible without authentication */}
+          {/* Ruta pública de login */}
           <Route path="/login" element={<PaginaAcceso />} />
 
-          {/* Protected routes — ProtectedRoute redirects to /login if not authenticated */}
+          {/* Rutas protegidas: ProtectedRoute redirige a /login sin sesión */}
           <Route element={<ProtectedRoute />}>
-            {/* AppShell provides the persistent sidebar + top bar layout */}
+            {/* AppShell aporta layout persistente con sidebar y barra superior */}
             <Route element={<AppShell />}>
-              {/* Admin dashboard home page */}
+              {/* Inicio del panel admin */}
               <Route index element={<PaginaInicio />} />
 
-              {/* Parts inventory management */}
+              {/* Gestión de inventario de piezas */}
               <Route path="/inventory" element={<InventarioPage />} />
 
-              {/* TF.js-powered camera analysis view */}
-              <Route path="/analysis" element={<AnalisisPage />} />
+              {/* Biblioteca visual de piezas con control por rol */}
+              <Route path="/pieces" element={<PiecesPage />} />
 
-              {/* System event log viewer */}
+              {/* Visor de eventos y registros del sistema */}
               <Route path="/logs" element={<RegistrosPage />} />
 
-              {/* Mobile operator camera console (also the PWA start_url target) */}
+              {/* Consola de cámara para operarios (objetivo de start_url PWA) */}
               <Route path="/camera" element={<PaginaCamara />} />
 
-              {/* Admin-only user and role management settings */}
+              {/* Ajustes de usuarios y permisos (solo admin) */}
               <Route path="/settings" element={<AjustesPage />} />
             </Route>
           </Route>
 
-          {/* 404 catch-all: redirect any unknown path to the home dashboard */}
+          {/* Captura 404: redirige rutas desconocidas al inicio */}
           <Route path="*" element={<Navigate replace to="/" />} />
         </Routes>
       </BrowserRouter>
@@ -153,9 +144,8 @@ function AplicacionRaiz() {
   );
 }
 
-// ─── React Root Mount ────────────────────────────────────────────────────────
-// Render the full app into the #root element (defined in index.html).
-// AppProvider wraps the entire tree with the shared application state context.
+// ─── Montaje raíz de React ───────────────────────────────────────────────────
+// Renderiza la aplicación completa en #root y envuelve todo con AppProvider.
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
     <AppProvider>
@@ -164,51 +154,44 @@ ReactDOM.createRoot(document.getElementById("root")).render(
   </React.StrictMode>,
 );
 
-// ─── Service Worker Registration ─────────────────────────────────────────────
-// Register the service worker only in production or when the PWA install flag
-// is active. In pure local dev mode (localhost without ?pwa=1) the SW is
-// unregistered to prevent stale cache issues during development.
+// ─── Registro de Service Worker ──────────────────────────────────────────────
+// Registra SW en producción o cuando se activa modo PWA.
+// En desarrollo local puro, desregistra SW para evitar cachés obsoletas.
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", async () => {
-    // Inject the dynamic PWA manifest after the page loads
+    // Inyecta el manifest PWA dinámico tras cargar la página.
     registerDynamicManifest();
 
     const currentUrl = new URL(window.location.href);
 
-    // Determine if we are running on a local preview host (localhost / 127.x / 0.x)
+    // Detecta si se está ejecutando en un host local de previsualización.
     const isLocalPreviewHost = /^(localhost|127\.0\.0\.1|0\.0\.0\.0)$/i.test(currentUrl.hostname);
 
-    // Register SW when: (a) in production build, OR (b) explicitly requested
-    // via ?pwa=1 query param, OR (c) running on a non-local host (e.g. ngrok,
-    // drive.servidor.dpdns.org, Vercel preview URL).
+    // Registra SW cuando:
+    // (a) build de producción, (b) ?pwa=1, o (c) host no local (ngrok/Vercel).
     const shouldRegisterInDev =
       currentUrl.searchParams.get("pwa") === "1" ||
       !isLocalPreviewHost;
 
     if (import.meta.env.PROD || shouldRegisterInDev) {
-      // Pass ngrok-skip-browser-warning header via query param to avoid
-      // ngrok's browser warning page intercepting the SW fetch.
+      // Añade query de ngrok para evitar la pantalla intermedia al pedir sw.js.
       navigator.serviceWorker.register("/sw.js?ngrok-skip-browser-warning=true");
 
-      // ─── Login Auto-Refresh for Stuck Auth (drive.servidor.dpdns.org) ──────
-      // When the app is served behind a reverse proxy (e.g. drive.servidor.dpdns.org)
-      // the InsForge session cookie can expire silently, leaving the user stuck
-      // on the login page indefinitely even after a successful sign-in attempt.
-      // This detects the stuck state and forces a full page reload to recover.
+      // ─── Auto-recarga de login atascado ─────────────────────────────────────
+      // Detrás de reverse proxy la cookie de sesión puede expirar en silencio.
+      // Si el usuario se queda atascado en /login, se fuerza recarga para recuperar.
       if (!isLocalPreviewHost) {
         let loginStuckTimer = null;
 
-        // Monitor for navigation events — if the user stays on /login for
-        // more than 12 seconds after the page has fully loaded, AND they have
-        // an active InsForge session token, force an auto-refresh to recover.
+        // Si el usuario permanece en /login más de 12 s con cookie activa,
+        // se intenta una recarga automática para recuperar sesión.
         const checkLoginStuck = () => {
           const hasSessionCookie = document.cookie.includes("insforge_csrf_token=");
           
-          // Only apply the refresh logic if the user appears to have a session 
-          // but is stuck on the login page.
+          // Solo aplica si parece haber sesión pero la UI sigue en login.
           if (window.location.pathname === "/login" && hasSessionCookie) {
             loginStuckTimer = setTimeout(() => {
-              // Only refresh if still on /login AND still have the cookie
+              // Recarga solo si se mantiene en /login y la cookie sigue presente.
               if (window.location.pathname === "/login" && document.cookie.includes("insforge_csrf_token=")) {
                 window.location.reload();
               }
@@ -216,10 +199,10 @@ if ("serviceWorker" in navigator) {
           }
         };
 
-        // Start the check on page load
+        // Inicia la comprobación al cargar.
         checkLoginStuck();
 
-        // Clear the timer on any navigation away from /login
+        // Limpia el temporizador al navegar fuera de /login.
         window.addEventListener("popstate", () => {
           clearTimeout(loginStuckTimer);
           checkLoginStuck();
@@ -229,8 +212,8 @@ if ("serviceWorker" in navigator) {
       return;
     }
 
-    // In pure local dev mode: unregister any existing service workers to
-    // ensure fresh content is always served from the Vite dev server.
+    // En desarrollo local puro: desregistra service workers existentes para
+    // asegurar que siempre se sirva contenido fresco desde Vite.
     const registrations = await navigator.serviceWorker.getRegistrations();
     await Promise.all(registrations.map((registration) => registration.unregister()));
   });

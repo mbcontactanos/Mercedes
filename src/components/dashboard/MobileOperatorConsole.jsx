@@ -24,13 +24,10 @@ const COPY = {
     connected: "Conexion activa con el admin",
     disconnected: "Sin emision",
     autoStopped: "Modo de trabajo desconectado al ocultarse o bloquearse la app",
-    ready: "Preparado para enviar video al panel central",
     denied: "Solicitud denegada por el admin",
     approved: "Solicitud aprobada por el admin",
     permissionError: "No se pudo abrir la camara del movil.",
     unsupported: "Este dispositivo no expone una camara compatible en navegador.",
-    videoTitle: "Preview local del operario",
-    cardTitle: "Movil conectado",
     connecting: "Conectando",
     supervised: "Supervision obligatoria",
     flexible: "Permisos operativos",
@@ -53,13 +50,10 @@ const COPY = {
     connected: "Connected to admin",
     disconnected: "No broadcast",
     autoStopped: "Work mode disconnected when the app was hidden or locked",
-    ready: "Ready to send video to the central panel",
     denied: "Request denied by admin",
     approved: "Request approved by admin",
     permissionError: "The phone camera could not be opened.",
     unsupported: "This device does not expose a compatible browser camera.",
-    videoTitle: "Operator local preview",
-    cardTitle: "Connected mobile",
     connecting: "Connecting",
     supervised: "Mandatory supervision",
     flexible: "Operational permissions",
@@ -176,7 +170,7 @@ export default function ConsolaOperarioMovil({
         category: "camera",
       });
     } catch {
-      // Best-effort logging only.
+      // El registro de eventos es best-effort; no debe romper el flujo principal.
     }
   };
 
@@ -198,7 +192,7 @@ export default function ConsolaOperarioMovil({
         },
       });
     } catch {
-      // If persistence fails, the real-time request still reaches the admin hub.
+      // Si falla la persistencia, la solicitud en tiempo real igualmente llega al hub admin.
     }
   };
 
@@ -222,7 +216,7 @@ export default function ConsolaOperarioMovil({
         })
         .eq("id", requestId);
     } catch {
-      // Keep the real-time admin response even if persistence fails.
+      // Conserva la respuesta en tiempo real al admin aunque falle la persistencia.
     }
 
     setIncomingRequests((currentRequests) => currentRequests.filter((request) => request.id !== requestId));
@@ -247,7 +241,7 @@ export default function ConsolaOperarioMovil({
     try {
       await wakeLockRef.current.release();
     } catch {
-      // Ignore release failures; the sentinel may already be unavailable.
+      // Ignora fallos al liberar; el sentinel puede no estar disponible ya.
     } finally {
       wakeLockRef.current = null;
     }
@@ -267,7 +261,7 @@ export default function ConsolaOperarioMovil({
         }
       });
     } catch {
-      // Wake Lock may be denied by the device, battery saver, or browser policy.
+      // Wake Lock puede ser rechazado por el dispositivo, ahorro de batería o políticas del navegador.
     }
   };
 
@@ -360,10 +354,10 @@ export default function ConsolaOperarioMovil({
         },
         ...currentRequests.filter((request) => request.id !== message.requestId),
       ]);
-      // Use a non-blocking info toast instead of sileo.show() with duration:null.
-      // sileo.show + duration:null creates a persistent overlay with pointer-event capture
-      // that blocks the admin Approve/Deny buttons in PanelMonitoreoAdmin and BarraSuperior.
-      // The actual accept/reject UI is already handled by the incomingRequests inbox panel below.
+      // Usa un toast informativo no bloqueante en lugar de sileo.show() con duration:null.
+      // sileo.show + duration:null crea un overlay persistente que captura eventos de puntero
+      // y puede bloquear los botones Aprobar/Rechazar en PanelMonitoreoAdmin y BarraSuperior.
+      // La UI real de aceptar/rechazar ya se gestiona en el panel incomingRequests.
       sileo.info({
         title: copy.incomingRequest,
         description: message.detail,
@@ -497,27 +491,17 @@ export default function ConsolaOperarioMovil({
   return (
     <section className="space-y-6">
       <div className="overflow-hidden rounded-[24px] border border-[#dee2e6] bg-white shadow-[0_18px_40px_rgba(15,23,42,0.08)] dark:border-[#2c3440] dark:bg-[#13171d]">
-        <div className="flex items-center justify-between border-b border-[#dee2e6] px-5 py-4 dark:border-[#2c3440]">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.32em] text-[#64748b] dark:text-[#8ea0b7]">
-              {copy.cardTitle}
-            </p>
-            <h3 className="mt-2 text-lg font-semibold text-[#1a1a1a] dark:text-white">{copy.videoTitle}</h3>
-          </div>
-          <span className="rounded-full bg-[#f3f4f6] px-3 py-2 text-xs font-bold text-[#1a1a1a] dark:bg-[#1d242e] dark:text-white">
-            {isBroadcasting ? copy.connected : copy.ready}
-          </span>
-        </div>
-
-        <div className="relative bg-black">
-          <video autoPlay className="aspect-[9/14] w-full object-cover" muted playsInline ref={previewRef} />
+        <div className="px-4 pt-4 md:px-5 md:pt-5">
+          <div className="relative overflow-hidden rounded-[20px] bg-black md:rounded-[24px]">
+            <video autoPlay className="aspect-[9/14] w-full rounded-[20px] object-cover md:rounded-[24px]" muted playsInline ref={previewRef} />
           <div className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-full bg-white/90 px-3 py-2 text-xs font-semibold text-black">
             <Camera size={14} />
             {activeOperator.name}
           </div>
         </div>
+        </div>
 
-        <div className="grid gap-3 px-5 py-5">
+        <div className="grid gap-3 px-4 py-4 md:px-5 md:py-5">
           <button
             className="inline-flex items-center justify-center gap-2 rounded-full bg-black px-4 py-4 text-sm font-semibold text-white transition hover:bg-neutral-800 dark:bg-white dark:text-black dark:hover:bg-[#dbe4ef]"
             onClick={() => {

@@ -4,42 +4,37 @@ import InstallationPrompt from "../components/pwa/InstallationPrompt.jsx";
 import { useAppContext } from "../context/useAppContext.js";
 
 /**
- * AppShell — Persistent Layout Shell
+ * AppShell — Contenedor persistente de la aplicación
  *
- * This component wraps all authenticated pages with the shared application
- * layout (sidebar navigation, top bar, notification drawer, PWA install prompt).
- * It also enforces role-based routing:
+ * Este componente envuelve todas las páginas autenticadas con el layout común
+ * (sidebar, barra superior, centro de notificaciones y prompt de instalación PWA).
+ * También aplica enrutado según rol:
  *
- *   • Admin users → can access all pages (inventory, analysis, logs, camera, settings)
- *   • Non-admin users (operarios, bachilleres, FP) → always redirected to /camera
- *     The mobile camera console is the only view exposed to non-admin roles.
+ *   • Usuarios admin → pueden acceder a inventario, logs, cámara y ajustes.
+ *   • Usuarios no admin (operario, bachiller, FP) → se redirigen siempre a /camera.
  *
- * The "camera" page on mobile or for non-admin roles skips the AppLayout
- * entirely and renders the Outlet directly (full-screen mobile camera view).
+ * Si la página actual es "camera" en móvil o para usuarios no admin, se omite
+ * AppLayout y se renderiza únicamente el Outlet (vista completa de cámara).
  *
- * ROUTE_MAP: Maps URL pathnames → internal page key strings used by AppLayout
- *   for highlighting the active sidebar item and for conditional rendering.
+ * ROUTE_MAP: Mapea pathname URL → clave interna de página usada por AppLayout.
+ * ROUTE_BY_PAGE: Mapea clave interna de página → pathname para navegación.
  *
- * ROUTE_BY_PAGE: Reverse map — page key → URL — used by the onNavigate callback
- *   passed to AppLayout so the sidebar can trigger React Router navigation.
- *
- * NOTE: All paths here must exactly match the <Route path="..."> definitions
- *   in main.jsx. Currently both use English keys (/camera, /settings, etc.).
+ * Nota: las rutas aquí deben coincidir con las rutas declaradas en main.jsx.
  */
 
-// Maps URL pathname → logical page key used by AppLayout for active tab tracking
+// Mapea pathname URL a clave de página para resaltar la pestaña activa.
 const ROUTE_MAP = {
   "/inventory": "inventory",
-  "/analysis": "analysis",
+  "/pieces": "pieces",
   "/logs": "logs",
   "/camera": "camera",
   "/settings": "settings",
 };
 
-// Maps logical page key → URL pathname for programmatic navigation from the sidebar
+// Mapea clave de página a pathname para navegación programática desde el sidebar.
 const ROUTE_BY_PAGE = {
   inventory: "/inventory",
-  analysis: "/analysis",
+  pieces: "/pieces",
   logs: "/logs",
   camera: "/camera",
   settings: "/settings",
@@ -84,7 +79,7 @@ export default function AppShell() {
 
   const currentPage = ROUTE_MAP[location.pathname] ?? "inventory";
 
-  // Redirect logic: Non-admin users can only access the camera interface
+  // Redirección por rol: los usuarios no admin solo pueden usar la interfaz de cámara.
   if (roleKey !== "admin" && currentPage !== "camera") {
     return <Navigate replace to="/camera" />;
   }

@@ -1,9 +1,9 @@
-import { Activity, Boxes, Camera, ClipboardList } from "lucide-react";
+import { Boxes, Camera, ClipboardList, Images } from "lucide-react";
 import { NAV_ITEMS } from "../../config/ui-copy.js";
 
 const ICONS = {
   inventory: Boxes,
-  analysis: Activity,
+  pieces: Images,
   logs: ClipboardList,
   camera: Camera,
 };

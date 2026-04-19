@@ -11,14 +11,14 @@ export const NAV_ITEMS = [
     },
   },
   {
-    key: "analysis",
+    key: "pieces",
     label: {
-      es: "Analisis",
-      en: "Analytics",
+      es: "Piezas",
+      en: "Pieces",
     },
     shortLabel: {
-      es: "Analisis",
-      en: "Analytics",
+      es: "Piezas",
+      en: "Pieces",
     },
   },
   {
@@ -99,14 +99,14 @@ export const PAGE_COPY = {
       en: "Inventory Control",
     },
   },
-  analysis: {
+  pieces: {
     subtitle: {
-      es: "ANALITICA OPERATIVA",
-      en: "OPERATIONS ANALYTICS",
+      es: "BIBLIOTECA VISUAL",
+      en: "VISUAL LIBRARY",
     },
     title: {
-      es: "Centro de Analisis",
-      en: "Analytics Center",
+      es: "Fotos y permisos de piezas",
+      en: "Piece photos and access",
     },
   },
   logs: {

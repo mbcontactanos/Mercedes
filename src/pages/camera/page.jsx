@@ -71,7 +71,7 @@ export default function CameraPage() {
           ) : null}
         </div>
       ) : (
-        <div className="grid gap-6 xl:grid-cols-[1.55fr_0.8fr]">
+        <div className="grid gap-6 xl:items-start xl:grid-cols-[1.55fr_0.8fr]">
           <AdminMonitoringPanel
             adminHubReady={adminHubReady}
             detections={detections}
@@ -84,16 +84,18 @@ export default function CameraPage() {
             pendingRequests={pendingRequests}
             videoRefs={videoRefs}
           />
-          <AssistantPanel
-            detections={detections}
-            inputValue={inputValue}
-            isListening={isListening}
-            lang={lang}
-            messages={messages}
-            onInputChange={onInputChange}
-            onSubmit={handleSendMessage}
-            onVoiceCapture={handleVoiceCapture}
-          />
+          <div className="xl:sticky xl:top-6 xl:self-start">
+            <AssistantPanel
+              detections={detections}
+              inputValue={inputValue}
+              isListening={isListening}
+              lang={lang}
+              messages={messages}
+              onInputChange={onInputChange}
+              onSubmit={handleSendMessage}
+              onVoiceCapture={handleVoiceCapture}
+            />
+          </div>
         </div>
       )}
     </div>

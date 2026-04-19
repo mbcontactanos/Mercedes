@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, MonitorSmartphone, ShieldCheck, Video, X } from "lucide-react";
 import { identifyPieceElement, sampleDetectionColor } from "../../lib/piece-detection.js";
 
@@ -15,7 +15,6 @@ const COPY = {
     approve: "Aprobar",
     deny: "Denegar",
     camera: "Camara remota",
-    updated: "Ultima actividad",
     detector: "TensorFlow activo",
     sizes: {
       tiny: "Muy pequeno",
@@ -36,7 +35,6 @@ const COPY = {
     approve: "Approve",
     deny: "Deny",
     camera: "Remote camera",
-    updated: "Last activity",
     detector: "TensorFlow active",
     sizes: {
       tiny: "Tiny",
@@ -52,17 +50,6 @@ const MAX_BOXES = 12;
 const FULL_FRAME_MIN_SCORE = 0.2;
 const ZOOM_FRAME_MIN_SCORE = 0.1;
 const ZOOM_CROP_RATIO = 0.68;
-
-function formatTimestamp(timestamp, lang) {
-  if (!timestamp) {
-    return lang === "es" ? "Sin actividad" : "No activity";
-  }
-
-  return new Intl.DateTimeFormat(lang === "es" ? "es-ES" : "en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(timestamp));
-}
 
 function normalizeDetection(rawDetection, frameWidth, frameHeight, copy, source) {
   const [x, y, width, height] = rawDetection.bbox;
@@ -342,6 +329,21 @@ export default function PanelMonitoreoAdmin({
 
     return slots;
   }, [lang, mobileOperators]);
+  const [selectedOperatorId, setSelectedOperatorId] = useState("");
+
+  useEffect(() => {
+    if (!cubosOperarios.length) {
+      setSelectedOperatorId("");
+      return;
+    }
+
+    setSelectedOperatorId((current) => {
+      if (current && cubosOperarios.some((operator) => operator.id === current)) {
+        return current;
+      }
+      return cubosOperarios[0].id;
+    });
+  }, [cubosOperarios]);
 
   useEffect(() => {
     if (!adminHubReady) {
@@ -482,215 +484,152 @@ export default function PanelMonitoreoAdmin({
     };
   }, [adminHubReady, copy, cubosOperarios, onDetectionsChange, operatorStreams, videoRefs]);
 
+  const operadorSeleccionado = cubosOperarios.find((operator) => operator.id === selectedOperatorId) ?? cubosOperarios[0];
+  const streamSeleccionado = operadorSeleccionado ? operatorStreams[operadorSeleccionado.id] : null;
+  const operadorEnVivo =
+    Boolean(operadorSeleccionado) &&
+    !operadorSeleccionado.esMarcador &&
+    Boolean(streamSeleccionado?.stream) &&
+    operadorSeleccionado.connected;
+  const deteccionesSeleccionadas = operadorSeleccionado
+    ? detections.filter((item) => item.operatorId === operadorSeleccionado.id)
+    : [];
+
   return (
     <section className="space-y-6">
-      <div className="rounded-[24px] border border-[#dee2e6] bg-white p-6 shadow-[0_18px_40px_rgba(15,23,42,0.08)] dark:border-[#2c3440] dark:bg-[#13171d]">
-        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.32em] text-[#64748b] dark:text-[#8ea0b7]">Remote Ops</p>
-            <h2 className="mt-2 text-xl font-semibold text-[#1a1a1a] dark:text-white">{copy.title}</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-[#64748b] dark:text-[#aab6c6]">{copy.subtitle}</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex items-center gap-2 rounded-full border border-[#dee2e6] bg-[#f8f9fa] px-4 py-2 text-xs font-bold uppercase tracking-[0.14em] text-[#1a1a1a] dark:border-[#2c3440] dark:bg-[#191f27] dark:text-white">
-              <ShieldCheck size={15} />
-              {adminHubReady ? copy.ready : copy.waiting}
-            </div>
-            <div className="inline-flex items-center gap-2 rounded-full bg-black px-4 py-2 text-xs font-bold uppercase tracking-[0.14em] text-white dark:bg-white dark:text-black">
-              <Video size={15} />
-              {copy.detector}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-2">
-        {cubosOperarios.map((operator) => {
-          const streamEntry = operatorStreams[operator.id];
-          const isLive = !operator.esMarcador && Boolean(streamEntry?.stream) && operator.connected;
-          const operatorDetections = detections.filter((item) => item.operatorId === operator.id);
-
-          return (
-            <article
-              className="overflow-hidden rounded-[24px] border border-[#dee2e6] bg-white shadow-[0_18px_40px_rgba(15,23,42,0.08)] dark:border-[#2c3440] dark:bg-[#13171d]"
-              key={operator.id}
-            >
-              <div className="flex items-center justify-between border-b border-[#dee2e6] px-5 py-4 dark:border-[#2c3440]">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-11 w-11 items-center justify-center rounded-full bg-[#f3f4f6] text-[#1a1a1a] dark:bg-[#1d242e] dark:text-white">
-                    <MonitorSmartphone size={18} />
+      <div className="space-y-4">
+        <div className="flex gap-3 overflow-x-auto pb-1">
+          {cubosOperarios.map((operator) => {
+            const streamEntry = operatorStreams[operator.id];
+            const isLive = !operator.esMarcador && Boolean(streamEntry?.stream) && operator.connected;
+            const isSelected = operator.id === operadorSeleccionado?.id;
+            return (
+              <button
+                className={`min-w-[220px] rounded-2xl border px-4 py-3 text-left transition ${
+                  isSelected
+                    ? "border-[#111827] bg-[#111827] text-white dark:border-white dark:bg-white dark:text-black"
+                    : "border-[#dee2e6] bg-white text-[#1a1a1a] hover:border-[#cfd4da] dark:border-[#2c3440] dark:bg-[#13171d] dark:text-white dark:hover:border-[#3b4655]"
+                }`}
+                key={operator.id}
+                onClick={() => setSelectedOperatorId(operator.id)}
+                type="button"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-['Space_Grotesk'] text-sm font-bold">{operator.name}</p>
+                    <p className={`truncate text-xs ${isSelected ? "text-white/80 dark:text-black/70" : "text-[#64748b] dark:text-[#8ea0b7]"}`}>{operator.shift}</p>
                   </div>
-                  <div>
-                    <p className="font-['Space_Grotesk'] text-base font-bold text-[#1a1a1a] dark:text-white">{operator.name}</p>
-                    <p className="text-xs text-[#64748b] dark:text-[#8ea0b7]">{operator.shift}</p>
-                  </div>
+                  <span
+                    className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${
+                      isLive
+                        ? isSelected
+                          ? "bg-white text-black dark:bg-black dark:text-white"
+                          : "bg-black text-white dark:bg-white dark:text-black"
+                        : isSelected
+                          ? "bg-white/20 text-white dark:bg-black/10 dark:text-black"
+                          : "bg-[#e9ecef] text-[#495057] dark:bg-[#1d242e] dark:text-[#aab6c6]"
+                    }`}
+                  >
+                    {isLive ? copy.live : copy.offline}
+                  </span>
                 </div>
-                <span
-                  className={`rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-[0.12em] ${
-                    isLive
-                      ? "bg-black text-white dark:bg-white dark:text-black"
-                      : "bg-[#e9ecef] text-[#495057] dark:bg-[#1d242e] dark:text-[#aab6c6]"
-                  }`}
-                >
-                  {isLive ? copy.live : copy.offline}
-                </span>
-              </div>
+              </button>
+            );
+          })}
+        </div>
 
-              <div className="relative bg-black">
-                {isLive ? (
-                  <>
-                    <video
-                      autoPlay
-                      className="aspect-square w-full object-cover"
-                      muted
-                      playsInline
-                      ref={(node) => {
-                        if (node) {
-                          videoRefs.current[operator.id] = node;
-                        }
-                      }}
-                    />
-                    <div className="pointer-events-none absolute inset-0">
-                      {operatorDetections.map((detection) => {
-                        const box = detection.visualBbox ?? detection.bbox;
-                        const left = `${(box[0] / detection.frameWidth) * 100}%`;
-                        const top = `${(box[1] / detection.frameHeight) * 100}%`;
-                        const width = `${(box[2] / detection.frameWidth) * 100}%`;
-                        const height = `${(box[3] / detection.frameHeight) * 100}%`;
-                        const theme = getOverlayTheme(detection);
-                        const label = getOverlayLabel(detection);
-                        const axisDirection = detection.axisDirection ?? "horizontal";
-                        const axisClass =
-                          axisDirection === "vertical"
-                            ? "top-3 bottom-3 left-1/2 w-[2px] -translate-x-1/2"
-                            : axisDirection === "diagonal"
-                              ? "left-2 right-2 top-1/2 h-[2px] -translate-y-1/2 rotate-12"
-                              : "left-3 right-3 top-1/2 h-[2px] -translate-y-1/2";
+        {operadorSeleccionado ? (
+          <article className="overflow-hidden rounded-[24px] border border-[#dee2e6] bg-white shadow-[0_18px_40px_rgba(15,23,42,0.08)] dark:border-[#2c3440] dark:bg-[#13171d]">
+            <div className="p-2 md:p-3">
+              <div className="relative aspect-[16/9] w-full overflow-hidden rounded-[24px] bg-black">
+              {operadorEnVivo ? (
+                <>
+                  <video
+                    autoPlay
+                    className="h-full w-full object-cover"
+                    muted
+                    playsInline
+                    ref={(node) => {
+                      if (node && operadorSeleccionado) {
+                        videoRefs.current[operadorSeleccionado.id] = node;
+                      }
+                    }}
+                  />
+                  <div className="pointer-events-none absolute inset-0">
+                    {deteccionesSeleccionadas.map((detection) => {
+                      const box = detection.visualBbox ?? detection.bbox;
+                      const left = `${(box[0] / detection.frameWidth) * 100}%`;
+                      const top = `${(box[1] / detection.frameHeight) * 100}%`;
+                      const width = `${(box[2] / detection.frameWidth) * 100}%`;
+                      const height = `${(box[3] / detection.frameHeight) * 100}%`;
+                      const theme = getOverlayTheme(detection);
+                      const label = getOverlayLabel(detection);
+                      const axisDirection = detection.axisDirection ?? "horizontal";
+                      const axisClass =
+                        axisDirection === "vertical"
+                          ? "top-3 bottom-3 left-1/2 w-[2px] -translate-x-1/2"
+                          : axisDirection === "diagonal"
+                            ? "left-2 right-2 top-1/2 h-[2px] -translate-y-1/2 rotate-12"
+                            : "left-3 right-3 top-1/2 h-[2px] -translate-y-1/2";
 
-                        return (
+                      return (
+                        <div
+                          className={`absolute rounded-[18px] border-2 ${theme.border} ${theme.fill} ${theme.glow}`}
+                          key={detection.id}
+                          style={{ left, top, width, height }}
+                        >
+                          <div className={`absolute inset-1 rounded-[14px] border ${theme.innerBorder}`} />
                           <div
-                            className={`absolute rounded-[18px] border-2 ${theme.border} ${theme.fill} ${theme.glow}`}
-                            key={detection.id}
-                            style={{ left, top, width, height }}
-                          >
-                            <div className={`absolute inset-1 rounded-[14px] border ${theme.innerBorder}`} />
-                            <div
-                              className={`absolute ${axisClass} rounded-full ${theme.axis} origin-center`}
-                              style={{
-                                opacity: detection.elementType === "pieza" ? 0.92 : 0.68,
-                              }}
-                            />
-                            <span className={`absolute left-0 top-0 h-3.5 w-3.5 rounded-[5px] border border-white/25 ${theme.marker}`} />
-                            <span className={`absolute right-0 top-0 h-3.5 w-3.5 rounded-[5px] border border-white/25 ${theme.marker}`} />
-                            <span className={`absolute left-0 bottom-0 h-3.5 w-3.5 rounded-[5px] border border-white/25 ${theme.marker}`} />
-                            <span className={`absolute right-0 bottom-0 h-3.5 w-3.5 rounded-[5px] border border-white/25 ${theme.marker}`} />
-                            <div className={`absolute left-2 top-2 rounded-2xl px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] ${theme.label}`}>
-                              <div>{label.baseLabel}</div>
-                              <div className="mt-1 flex items-center gap-2 text-[9px] font-semibold tracking-[0.08em] opacity-90">
-                                <span>{label.directionLabel}</span>
-                                <span aria-hidden="true">&middot;</span>
-                                <span>{label.sizeLabel}</span>
-                                {label.confidenceLabel ? (
-                                  <>
-                                    <span aria-hidden="true">&middot;</span>
-                                    <span>{label.confidenceLabel}</span>
-                                  </>
-                                ) : null}
-                                {label.coverageLabel ? (
-                                  <>
-                                    <span aria-hidden="true">&middot;</span>
-                                    <span>{label.coverageLabel}</span>
-                                  </>
-                                ) : null}
-                              </div>
+                            className={`absolute ${axisClass} rounded-full ${theme.axis} origin-center`}
+                            style={{
+                              opacity: detection.elementType === "pieza" ? 0.92 : 0.68,
+                            }}
+                          />
+                          <span className={`absolute left-0 top-0 h-3.5 w-3.5 rounded-[5px] border border-white/25 ${theme.marker}`} />
+                          <span className={`absolute right-0 top-0 h-3.5 w-3.5 rounded-[5px] border border-white/25 ${theme.marker}`} />
+                          <span className={`absolute left-0 bottom-0 h-3.5 w-3.5 rounded-[5px] border border-white/25 ${theme.marker}`} />
+                          <span className={`absolute right-0 bottom-0 h-3.5 w-3.5 rounded-[5px] border border-white/25 ${theme.marker}`} />
+                          <div className={`absolute left-2 top-2 rounded-2xl px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-[0.12em] ${theme.label}`}>
+                            <div>{label.baseLabel}</div>
+                            <div className="mt-1 flex items-center gap-2 text-[9px] font-semibold tracking-[0.08em] opacity-90">
+                              <span>{label.directionLabel}</span>
+                              <span aria-hidden="true">&middot;</span>
+                              <span>{label.sizeLabel}</span>
+                              {label.confidenceLabel ? (
+                                <>
+                                  <span aria-hidden="true">&middot;</span>
+                                  <span>{label.confidenceLabel}</span>
+                                </>
+                              ) : null}
+                              {label.coverageLabel ? (
+                                <>
+                                  <span aria-hidden="true">&middot;</span>
+                                  <span>{label.coverageLabel}</span>
+                                </>
+                              ) : null}
                             </div>
                           </div>
-                        );
-                      })}
-                    </div>
-                  </>
-                ) : (
-                  <div className="flex aspect-square flex-col items-center justify-center gap-3 px-8 text-center text-sm leading-6 text-white/75">
-                    <MonitorSmartphone size={30} />
-                    <span>{operator.esMarcador ? operator.shift : copy.noSignal}</span>
+                        </div>
+                      );
+                    })}
                   </div>
-                )}
-                <div className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-full bg-white/90 px-3 py-2 text-xs font-semibold text-black">
-                  <Video size={14} />
-                  {copy.camera}
+                </>
+              ) : (
+                <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center text-sm leading-6 text-white/75">
+                  <MonitorSmartphone size={30} />
+                  <span>{operadorSeleccionado.esMarcador ? operadorSeleccionado.shift : copy.noSignal}</span>
                 </div>
-                <div className="absolute inset-x-4 bottom-4 rounded-2xl bg-white/92 px-4 py-3 text-left text-[#1a1a1a]">
-                  <p className="text-[11px] uppercase tracking-[0.18em] text-[#64748b]">{copy.updated}</p>
-                  <p className="mt-1 text-sm font-semibold">{formatTimestamp(operator.lastSeen, lang)}</p>
-                  <p className="mt-2 text-xs text-[#495057]">{operator.activity}</p>
-                </div>
+              )}
+              <div className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-full bg-white/90 px-3 py-2 text-xs font-semibold text-black">
+                <Video size={14} />
+                {copy.camera}
               </div>
-            </article>
-          );
-        })}
+            </div>
+            </div>
+          </article>
+        ) : null}
       </div>
 
-      <section className="rounded-[24px] border border-[#dee2e6] bg-white p-6 shadow-[0_18px_40px_rgba(15,23,42,0.08)] dark:border-[#2c3440] dark:bg-[#13171d]">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-[11px] uppercase tracking-[0.32em] text-[#64748b] dark:text-[#8ea0b7]">Workflow</p>
-            <h3 className="mt-2 text-lg font-semibold text-[#1a1a1a] dark:text-white">{copy.requests}</h3>
-          </div>
-          <span className="rounded-full bg-[#f3f4f6] px-3 py-2 text-xs font-bold text-[#1a1a1a] dark:bg-[#1d242e] dark:text-white">
-            {pendingRequests.length}
-          </span>
-        </div>
-
-        <div className="mt-5 space-y-4">
-          {pendingRequests.length ? (
-            pendingRequests.map((request) => (
-              <article
-                className="rounded-[22px] border border-[#dee2e6] bg-[#f8f9fa] p-4 dark:border-[#2c3440] dark:bg-[#191f27]"
-                key={request.id}
-              >
-                <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                  <div>
-                    <p className="font-['Space_Grotesk'] text-base font-bold text-[#1a1a1a] dark:text-white">{request.title}</p>
-                    <p className="mt-1 text-sm text-[#64748b] dark:text-[#aab6c6]">{request.detail}</p>
-                    <div className="mt-3 flex flex-wrap gap-2 text-[11px] uppercase tracking-[0.2em] text-[#64748b] dark:text-[#8ea0b7]">
-                      <span>{request.operatorName}</span>
-                      <span>· {request.requesterRoleLabel ?? request.requesterRole}</span>
-                      <span>· {request.approvalPolicy}</span>
-                    </div>
-                    {request.transcript ? (
-                      <p className="mt-3 rounded-2xl border border-[#dee2e6] bg-white px-3 py-3 text-sm text-[#334155] dark:border-[#2c3440] dark:bg-[#11161d] dark:text-[#dbe4ef]">
-                        {request.transcript}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-wrap gap-3">
-                    <button
-                      className="inline-flex items-center gap-2 rounded-full bg-black px-4 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800 dark:bg-white dark:text-black dark:hover:bg-[#dbe4ef]"
-                      onClick={() => onApproveRequest(request.id)}
-                      type="button"
-                    >
-                      <Check size={15} />
-                      {copy.approve}
-                    </button>
-                    <button
-                      className="inline-flex items-center gap-2 rounded-full border border-[#dee2e6] px-4 py-3 text-sm font-semibold text-[#1a1a1a] transition hover:bg-[#f3f4f6] dark:border-[#2c3440] dark:text-white dark:hover:bg-[#1d242e]"
-                      onClick={() => onDenyRequest(request.id)}
-                      type="button"
-                    >
-                      <X size={15} />
-                      {copy.deny}
-                    </button>
-                  </div>
-                </div>
-              </article>
-            ))
-          ) : (
-            <div className="rounded-[22px] border border-dashed border-[#dee2e6] px-4 py-8 text-center text-sm text-[#64748b] dark:border-[#2c3440] dark:text-[#8ea0b7]">
-              {lang === "es" ? "No hay solicitudes pendientes ahora mismo." : "There are no pending requests right now."}
-            </div>
-          )}
-        </div>
-      </section>
     </section>
   );
 }

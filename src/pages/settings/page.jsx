@@ -1,3 +1,10 @@
+/**
+ * AjustesPage (Settings)
+ * 
+ * Panel de administración para la gestión de usuarios y roles.
+ * Permite a los administradores invitar, editar y eliminar usuarios,
+ * con diálogos de confirmación para acciones críticas.
+ */
 import { useMemo, useState } from "react";
 import { LoaderCircle, Trash2, UserCog, UserRound } from "lucide-react";
 import { ROLE_DEFINITIONS, ROLE_KEYS } from "../../config/roles.js";

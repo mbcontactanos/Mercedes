@@ -1,3 +1,10 @@
+/**
+ * PaginaAcceso (Auth Page)
+ * 
+ * Gestiona el inicio de sesión de los usuarios. 
+ * Incluye validaciones de seguridad, normalización de emails y 
+ * limpieza de datos sensibles tras la autenticación.
+ */
 import { useState, useEffect } from "react";
 import { Eye, EyeOff, LockKeyhole } from "lucide-react";
 import { Navigate, useNavigate } from "react-router-dom";

@@ -1,3 +1,9 @@
+/**
+ * Configuración de Vite
+ * 
+ * Optimizada para el despliegue en Vercel mediante la división de código (code-splitting)
+ * manual de dependencias de node_modules para mejorar el rendimiento de carga.
+ */
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 

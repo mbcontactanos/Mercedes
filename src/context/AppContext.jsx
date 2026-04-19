@@ -1,3 +1,13 @@
+/**
+ * AppContext.jsx
+ * 
+ * Este es el corazón del estado global de la aplicación. Gestiona:
+ * - Autenticación y sesiones con Insforge.
+ * - Comunicación en tiempo real mediante PeerJS.
+ * - Estado de la PWA y detección de dispositivos móviles.
+ * - Integración con servicios externos (n8n, Kokoro TTS, Nextcloud).
+ * - Notificaciones globales y sistema de alertas.
+ */
 import { createContext, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Peer from "peerjs";
 import { sileo } from "sileo";

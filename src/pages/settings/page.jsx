@@ -110,6 +110,7 @@ export default function SettingsPage() {
   const [savedUserId, setSavedUserId] = useState("");
   const [creating, setCreating] = useState(false);
   const [actionError, setActionError] = useState("");
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const [createForm, setCreateForm] = useState({
     display_name: "",
     email: "",
@@ -194,10 +195,24 @@ export default function SettingsPage() {
   };
 
   const handleDelete = async (entry) => {
-    // Borrado duro desde frontend: por user_id y limpieza por email en AppContext.
+    // Solicitar confirmación antes de eliminar
+    setConfirmDialog({
+      type: "delete_user",
+      entry,
+      message: lang === "es"
+        ? `¿Estás seguro de que deseas eliminar a ${entry.display_name}? Esta acción no se puede deshacer.`
+        : `Are you sure you want to delete ${entry.display_name}? This action cannot be undone.`,
+    });
+  };
+
+  const confirmDelete = async () => {
+    if (!confirmDialog || confirmDialog.type !== "delete_user") return;
+
+    const { entry } = confirmDialog;
     setDeletingUserId(entry.user_id);
     const result = await deleteUserAccess(entry.user_id, entry.user_email ?? "");
     setDeletingUserId("");
+    setConfirmDialog(null);
 
     if (result.ok) {
       setSavedUserId(entry.user_id);
@@ -213,12 +228,42 @@ export default function SettingsPage() {
     const cleanForm = {
       ...createForm,
       display_name: createForm.display_name.trim(),
-      email: createForm.email.trim(),
+      email: createForm.email.trim().toLowerCase(),
       password: createForm.password.trim(),
     };
 
     if (!cleanForm.display_name || !cleanForm.email || !cleanForm.password) {
       setActionError(copy.error);
+      return;
+    }
+
+    // Validación de formato de email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanForm.email)) {
+      setActionError(lang === "es" ? "El email no es válido" : "Invalid email format");
+      return;
+    }
+
+    // Validación de longitud de campos
+    if (cleanForm.display_name.length > 255) {
+      setActionError(lang === "es" ? "El nombre es demasiado largo" : "Name is too long");
+      return;
+    }
+
+    if (cleanForm.password.length < 8) {
+      setActionError(lang === "es" ? "La contraseña debe tener al menos 8 caracteres" : "Password must be at least 8 characters");
+      return;
+    }
+
+    // Confirmación si se está creando un usuario admin
+    if (cleanForm.role === ROLE_KEYS.ADMIN) {
+      setConfirmDialog({
+        type: "create_admin",
+        form: cleanForm,
+        message: lang === "es"
+          ? `¿Estás seguro de que deseas crear un nuevo usuario Admin? Esta acción otorga acceso total al sistema.`
+          : `Are you sure you want to create a new Admin user? This grants full system access.`,
+      });
       return;
     }
 
@@ -229,6 +274,32 @@ export default function SettingsPage() {
 
     if (result.ok) {
       // Restablece el formulario para permitir alta rápida de otro usuario.
+      setActionError("");
+      setCreateForm({
+        display_name: "",
+        email: "",
+        password: "",
+        role: ROLE_KEYS.BACHILLER,
+        supervision_level: "standard",
+        assigned_operator_id: "",
+      });
+      return;
+    }
+
+    setActionError(result.error || copy.error);
+  };
+
+  const confirmCreateAdmin = async () => {
+    if (!confirmDialog || confirmDialog.type !== "create_admin") return;
+
+    const { form } = confirmDialog;
+    setCreating(true);
+    setSavedUserId("");
+    const result = await createUserAccess(form);
+    setCreating(false);
+    setConfirmDialog(null);
+
+    if (result.ok) {
       setActionError("");
       setCreateForm({
         display_name: "",

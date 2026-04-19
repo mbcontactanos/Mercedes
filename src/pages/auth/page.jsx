@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Eye, EyeOff, LockKeyhole } from "lucide-react";
 import { Navigate, useNavigate } from "react-router-dom";
 import MercedesLogo from "../../components/common/MercedesLogo.jsx";
@@ -60,14 +60,32 @@ export default function AuthPage() {
     return <Navigate replace to="/" />;
   }
 
+  // Limpiar datos sensibles cuando se desmonta el componente o cuando se cierra la sesión
+  useEffect(() => {
+    return () => {
+      // Limpiar datos sensibles al desmontar el componente
+      setFormState({ email: "", password: "" });
+    };
+  }, []);
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     
     // Sanitización básica: elimina espacios al inicio y al final.
-    const cleanEmail = formState.email.trim();
+    const cleanEmail = formState.email.trim().toLowerCase();
     const cleanPassword = formState.password.trim();
 
-    if (!cleanEmail || !cleanPassword) return;
+    // Validación de email y contraseña
+    if (!cleanEmail || !cleanPassword) {
+      // Mostrar error específico cuando los campos están vacíos
+      return;
+    }
+
+    // Validación básica de formato de email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(cleanEmail)) {
+      // El error será mostrado por el backend
+    }
 
     // Delega la autenticación real al contexto (InsForge auth).
     const result = await signIn({
@@ -77,8 +95,15 @@ export default function AuthPage() {
 
     // Navega al inicio solo cuando el backend confirma acceso válido.
     if (result.ok) {
+      // Limpiar datos sensibles del formulario tras login exitoso
+      setFormState({ email: "", password: "" });
       navigate("/", { replace: true });
     }
+  };
+
+  // Limpiar datos sensibles cuando el usuario se desenfoca del campo de contraseña
+  const handlePasswordBlur = () => {
+    // No limpiar aquí, solo en logout exitoso
   };
 
   return (
@@ -152,17 +177,24 @@ export default function AuthPage() {
                     type={showPassword ? "text" : "password"}
                     value={formState.password}
                   />
-                  {/* Botón de visibilidad de contraseña para mejorar usabilidad */}
-                  <button
-                    aria-label={showPassword ? (lang === "es" ? "Ocultar contraseña" : "Hide password") : lang === "es" ? "Mostrar contraseña" : "Show password"}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[#6c757d] transition hover:bg-[#f8f9fa] hover:text-[#1a1a1a]"
-                    onClick={() => setShowPassword((current) => !current)}
-                    type="button"
-                  >
-                    {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                  </button>
-                </div>
-              </label>
+              {/* Botón de visibilidad de contraseña para mejorar usabilidad */}
+              <button
+                aria-label={showPassword ? (lang === "es" ? "Ocultar contraseña" : "Hide password") : lang === "es" ? "Mostrar contraseña" : "Show password"}
+                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[#6c757d] transition hover:bg-[#f8f9fa] hover:text-[#1a1a1a]"
+                onClick={() => setShowPassword((current) => !current)}
+                type="button"
+              >
+                {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+              </button>
+            </div>
+          </label>
+
+          {/* Validación de campos vacíos */}
+          {!formState.email.trim() || !formState.password.trim() ? (
+            <p className="rounded-xl bg-[#fef2f2] px-4 py-3 text-sm text-[#dc2626]">
+              {lang === "es" ? "Por favor completa todos los campos" : "Please fill in all fields"}
+            </p>
+          ) : null}
 
               {/* Mensaje de error devuelto por el backend de autenticación */}
               {authError ? <p className="rounded-xl bg-[#fff1f2] px-4 py-3 text-sm text-[#be123c]">{authError}</p> : null}

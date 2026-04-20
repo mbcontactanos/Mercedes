@@ -2033,8 +2033,15 @@ export function AppProvider({ children }) {
     }
 
     await loadAppData(data.user, currentProfile);
+
+    const nextRole = normalizeRole(currentProfile?.role);
+    const nextRoleConfig = ROLE_DEFINITIONS[nextRole] ?? ROLE_DEFINITIONS[DEFAULT_ROLE];
+    const redirectTo = isMobileDevice && nextRole !== ROLE_KEYS.ADMIN
+      ? "/camera"
+      : nextRoleConfig.desktopDefaultRoute;
+
     setAuthBusy(false);
-    return { ok: true };
+    return { ok: true, redirectTo };
   };
 
   const signOut = async () => {

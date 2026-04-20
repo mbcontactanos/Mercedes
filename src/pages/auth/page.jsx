@@ -48,7 +48,10 @@ export default function AuthPage() {
     installReady,
     installSupport,
     isAuthenticated,
+    isMobileDevice,
     lang,
+    roleConfig,
+    roleKey,
     signIn,
     theme,
     toggleLang,
@@ -62,11 +65,6 @@ export default function AuthPage() {
   // Controla si la contraseña se visualiza en texto plano.
   const [showPassword, setShowPassword] = useState(false);
 
-  // Si la sesión ya está activa, evita volver a mostrar el login.
-  if (authReady && isAuthenticated) {
-    return <Navigate replace to="/" />;
-  }
-
   // Limpiar datos sensibles cuando se desmonta el componente o cuando se cierra la sesión
   useEffect(() => {
     return () => {
@@ -74,6 +72,15 @@ export default function AuthPage() {
       setFormState({ email: "", password: "" });
     };
   }, []);
+
+  const redirectAfterAuth = isMobileDevice && roleKey !== "admin"
+    ? "/camera"
+    : roleConfig?.desktopDefaultRoute ?? "/";
+
+  // Si la sesión ya está activa, evita volver a mostrar el login.
+  if (authReady && isAuthenticated) {
+    return <Navigate replace to={redirectAfterAuth} />;
+  }
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -104,12 +111,7 @@ export default function AuthPage() {
     if (result.ok) {
       // Limpiar datos sensibles del formulario tras login exitoso
       setFormState({ email: "", password: "" });
-      
-      // Forzar una pequeña espera para asegurar que el estado de auth y perfil se propague
-      // y que roleConfig esté disponible antes de la navegación inicial.
-      setTimeout(() => {
-        navigate("/", { replace: true });
-      }, 100);
+      navigate(result.redirectTo ?? redirectAfterAuth, { replace: true });
     }
   };
 

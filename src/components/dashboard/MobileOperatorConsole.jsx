@@ -68,6 +68,57 @@ const COPY = {
   },
 };
 
+async function attachPreviewStream(videoElement, stream) {
+  if (!videoElement) {
+    return;
+  }
+
+  if (videoElement.srcObject !== stream) {
+    videoElement.srcObject = stream;
+  }
+
+  try {
+    await videoElement.play();
+  } catch {
+    // Safari/iOS puede retrasar el primer play aunque el gesto venga del botÃ³n.
+  }
+}
+
+async function openMobileCameraStream() {
+  const candidates = [
+    {
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      },
+      audio: false,
+    },
+    {
+      video: {
+        facingMode: "environment",
+      },
+      audio: false,
+    },
+    {
+      video: true,
+      audio: false,
+    },
+  ];
+
+  let lastError = null;
+
+  for (const constraints of candidates) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw lastError ?? new Error("camera_unavailable");
+}
+
 export default function ConsolaOperarioMovil({
   lang,
   onStatusChange,
@@ -98,7 +149,7 @@ export default function ConsolaOperarioMovil({
 
   useEffect(() => {
     if (previewRef.current && streamRef.current && previewRef.current.srcObject !== streamRef.current) {
-      previewRef.current.srcObject = streamRef.current;
+      void attachPreviewStream(previewRef.current, streamRef.current);
     }
   }, [isBroadcasting]);
 
@@ -261,7 +312,7 @@ export default function ConsolaOperarioMovil({
         }
       });
     } catch {
-      // Wake Lock puede ser rechazado por el dispositivo, ahorro de batería o políticas del navegador.
+      // Wake Lock puede ser rechazado por el dispositivo, ahorro de baterÃ­a o polÃ­ticas del navegador.
     }
   };
 
@@ -354,10 +405,6 @@ export default function ConsolaOperarioMovil({
         },
         ...currentRequests.filter((request) => request.id !== message.requestId),
       ]);
-      // Usa un toast informativo no bloqueante en lugar de sileo.show() con duration:null.
-      // sileo.show + duration:null crea un overlay persistente que captura eventos de puntero
-      // y puede bloquear los botones Aprobar/Rechazar en PanelMonitoreoAdmin y BarraSuperior.
-      // La UI real de aceptar/rechazar ya se gestiona en el panel incomingRequests.
       sileo.info({
         title: copy.incomingRequest,
         description: message.detail,
@@ -389,23 +436,12 @@ export default function ConsolaOperarioMovil({
     onStatusChange(copy.connecting);
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-      });
+      const stream = await openMobileCameraStream();
 
       streamRef.current = stream;
 
       if (previewRef.current) {
-        previewRef.current.srcObject = stream;
+        await attachPreviewStream(previewRef.current, stream);
       }
 
       const peer = new Peer();
@@ -493,12 +529,18 @@ export default function ConsolaOperarioMovil({
       <div className="overflow-hidden rounded-[24px] border border-[#dee2e6] bg-white shadow-[0_18px_40px_rgba(15,23,42,0.08)] dark:border-[#2c3440] dark:bg-[#13171d]">
         <div className="px-4 pt-4 md:px-5 md:pt-5">
           <div className="relative overflow-hidden rounded-[20px] bg-black md:rounded-[24px]">
-            <video autoPlay className="aspect-[9/14] w-full rounded-[20px] object-cover md:rounded-[24px]" muted playsInline ref={previewRef} />
-          <div className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-full bg-white/90 px-3 py-2 text-xs font-semibold text-black">
-            <Camera size={14} />
-            {activeOperator.name}
+            <video
+              autoPlay
+              className="aspect-[9/14] w-full rounded-[20px] object-cover md:rounded-[24px]"
+              muted
+              playsInline
+              ref={previewRef}
+            />
+            <div className="absolute left-4 top-4 inline-flex items-center gap-2 rounded-full bg-white/90 px-3 py-2 text-xs font-semibold text-black">
+              <Camera size={14} />
+              {activeOperator.name}
+            </div>
           </div>
-        </div>
         </div>
 
         <div className="grid gap-3 px-4 py-4 md:px-5 md:py-5">
@@ -513,7 +555,13 @@ export default function ConsolaOperarioMovil({
             }}
             type="button"
           >
-            {isConnecting ? <LoaderCircle className="animate-spin" size={16} /> : isBroadcasting ? <VideoOff size={16} /> : <Video size={16} />}
+            {isConnecting ? (
+              <LoaderCircle className="animate-spin" size={16} />
+            ) : isBroadcasting ? (
+              <VideoOff size={16} />
+            ) : (
+              <Video size={16} />
+            )}
             {isBroadcasting ? copy.stop : copy.start}
           </button>
 

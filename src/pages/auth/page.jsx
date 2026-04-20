@@ -104,7 +104,12 @@ export default function AuthPage() {
     if (result.ok) {
       // Limpiar datos sensibles del formulario tras login exitoso
       setFormState({ email: "", password: "" });
-      navigate("/", { replace: true });
+      
+      // Forzar una pequeña espera para asegurar que el estado de auth y perfil se propague
+      // y que roleConfig esté disponible antes de la navegación inicial.
+      setTimeout(() => {
+        navigate("/", { replace: true });
+      }, 100);
     }
   };
 

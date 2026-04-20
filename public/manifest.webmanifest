@@ -2,7 +2,7 @@
   "name": "Mercedes Vitoria OPS",
   "short_name": "Mercedes OPS",
   "description": "PWA operativa para inventario, analisis, registros y camara industrial.",
-  "start_url": "/camara?pwa=1&ngrok-skip-browser-warning=true",
+  "start_url": "/camera?pwa=1&ngrok-skip-browser-warning=true",
   "scope": "/",
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],

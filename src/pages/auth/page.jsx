@@ -64,6 +64,8 @@ export default function AuthPage() {
   });
   // Controla si la contraseña se visualiza en texto plano.
   const [showPassword, setShowPassword] = useState(false);
+  // Controla si se muestra el error de campos vacíos tras un intento de envío.
+  const [showEmptyError, setShowEmptyError] = useState(false);
 
   // Limpiar datos sensibles cuando se desmonta el componente o cuando se cierra la sesión
   useEffect(() => {
@@ -92,8 +94,12 @@ export default function AuthPage() {
     // Validación de email y contraseña
     if (!cleanEmail || !cleanPassword) {
       // Mostrar error específico cuando los campos están vacíos
+      setShowEmptyError(true);
       return;
     }
+    
+    // Si llegamos aquí, los campos no están vacíos
+    setShowEmptyError(false);
 
     // Validación básica de formato de email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -203,8 +209,8 @@ export default function AuthPage() {
             </div>
           </label>
 
-          {/* Validación de campos vacíos */}
-          {!formState.email.trim() || !formState.password.trim() ? (
+          {/* Validación de campos vacíos tras intento de envío */}
+          {showEmptyError && (!formState.email.trim() || !formState.password.trim()) ? (
             <p className="rounded-xl bg-[#fef2f2] px-4 py-3 text-sm text-[#dc2626]">
               {lang === "es" ? "Por favor completa todos los campos" : "Please fill in all fields"}
             </p>

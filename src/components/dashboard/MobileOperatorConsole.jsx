@@ -7,6 +7,8 @@ import {
   ADMIN_HUB_CHANNEL,
   ADMIN_HUB_EVENT,
   ADMIN_HUB_HEARTBEAT_MS,
+  APPROVAL_REQUEST_EVENT,
+  APPROVAL_REQUESTS_CHANNEL,
   LEGACY_ADMIN_PEER_ID,
   isAdminHubFresh,
 } from "../../config/realtime.js";
@@ -318,7 +320,7 @@ export default function ConsolaOperarioMovil({
 
   const persistApprovalRequest = async (detail, transcript = "") => {
     try {
-      await insforge.database.from("approval_requests").insert({
+      const { data } = await insforge.database.from("approval_requests").insert({
         id: createDatabaseUuid(),
         requester_user_id: activeOperatorRef.current?.id ?? "mobile-operator",
         requester_name: activeOperatorRef.current?.name ?? "Operario",
@@ -332,7 +334,13 @@ export default function ConsolaOperarioMovil({
           shift: activeOperatorRef.current?.shift ?? "",
           source: "mobile-console",
         },
-      });
+      }).select().maybeSingle();
+
+      if (data) {
+        await insforge.realtime.connect();
+        await insforge.realtime.subscribe(APPROVAL_REQUESTS_CHANNEL);
+        await insforge.realtime.publish(APPROVAL_REQUESTS_CHANNEL, APPROVAL_REQUEST_EVENT, data);
+      }
     } catch {
       // Si falla la persistencia, la solicitud en tiempo real igualmente llega al hub admin.
     }

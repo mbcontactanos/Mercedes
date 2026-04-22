@@ -28,6 +28,8 @@ import {
   ADMIN_HUB_CHANNEL,
   ADMIN_HUB_EVENT,
   ADMIN_HUB_HEARTBEAT_MS,
+  APPROVAL_REQUEST_EVENT,
+  APPROVAL_REQUESTS_CHANNEL,
   createAdminPeerId,
 } from "../config/realtime.js";
 import { PART_REFERENCE_CATALOG } from "../config/parts-catalog.js";
@@ -239,6 +241,10 @@ function ApprovalToastContent({ approvalPolicy, detail, lang, onApprove, onDeny,
   );
 }
 
+function getApprovalToastId(requestId) {
+  return `approval-request-${requestId}`;
+}
+
 function mapApprovalRequest(row, lang) {
   return {
     id: row.id,
@@ -286,11 +292,34 @@ function detectMobileContext() {
 }
 
 function hasInsforgeSessionHint() {
-  if (typeof document === "undefined") {
+  if (typeof window === "undefined") {
     return false;
   }
 
-  return document.cookie.includes("insforge_csrf_token=");
+  const hasCsrfCookie = document.cookie.includes("insforge_csrf_token=");
+  const hasLocalAuthHint =
+    window.localStorage.getItem("mercedes-auth-active") === "true" ||
+    window.sessionStorage.getItem("mercedes-auth-active") === "true";
+
+  return hasCsrfCookie || hasLocalAuthHint;
+}
+
+function persistSessionHint() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem("mercedes-auth-active", "true");
+  window.sessionStorage.setItem("mercedes-auth-active", "true");
+}
+
+function clearSessionHint() {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.removeItem("mercedes-auth-active");
+  window.sessionStorage.removeItem("mercedes-auth-active");
 }
 
 function detectInstallSupport() {
@@ -892,6 +921,7 @@ export function AppProvider({ children }) {
     }
 
     sileo.show({
+      id: getApprovalToastId(request.id),
       title:
         reason === "incoming"
           ? lang === "es"
@@ -900,10 +930,51 @@ export function AppProvider({ children }) {
           : lang === "es"
             ? "Centro de aprobaciones"
             : "Approval center",
-      description: `${request.operatorName} · ${request.transcript || request.detail}`,
-      duration: 4500,
+      description: (
+        <div className="space-y-3 text-left">
+          <div className="space-y-1">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+              {request.requesterRoleLabel ?? request.approvalPolicy}
+            </p>
+            <p className="text-sm font-semibold text-slate-900 dark:text-white">{request.operatorName}</p>
+            <p className="text-sm leading-6 text-slate-700 dark:text-slate-200">
+              {request.transcript || request.detail}
+            </p>
+          </div>
+          <div className="flex items-center gap-3 text-xs font-semibold">
+            <a
+              className="rounded-full bg-black px-3 py-2 text-white dark:bg-white dark:text-black"
+              data-sileo-button
+              href="#"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                sileo.dismiss(getApprovalToastId(request.id));
+                void approveRequestRef.current?.(request.id);
+              }}
+            >
+              {lang === "es" ? "Aprobar" : "Approve"}
+            </a>
+            <a
+              className="rounded-full border border-slate-300 px-3 py-2 text-slate-900 dark:border-slate-600 dark:text-white"
+              data-sileo-button
+              href="#"
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                sileo.dismiss(getApprovalToastId(request.id));
+                void denyRequestRef.current?.(request.id);
+              }}
+            >
+              {lang === "es" ? "Denegar" : "Reject"}
+            </a>
+          </div>
+        </div>
+      ),
+      duration: reason === "incoming" ? 12000 : 9000,
       fill: theme === "dark" ? "#11161d" : "#ffffff",
       roundness: 24,
+      autopilot: false,
     });
   }, [lang, theme]);
 
@@ -1147,6 +1218,7 @@ export function AppProvider({ children }) {
     }
 
     await insforge.auth.signOut();
+    clearSessionHint();
     setUser(null);
     setProfile(null);
     setAuthError(
@@ -1161,31 +1233,37 @@ export function AppProvider({ children }) {
     let ignore = false;
 
     const initialize = async () => {
-      if (!hasInsforgeSessionHint()) {
-        if (!ignore) {
-          setAuthReady(true);
-        }
-        return;
-      }
+      let currentUser = null;
+      let currentUserResponse = await insforge.auth.getCurrentUser();
 
-      const { data } = await insforge.auth.getCurrentUser();
+      if (!currentUserResponse.data?.user && hasInsforgeSessionHint()) {
+        const refreshResponse = await insforge.auth.refreshSession();
+
+        if (!refreshResponse.error) {
+          currentUserResponse = await insforge.auth.getCurrentUser();
+        }
+      }
 
       if (ignore) {
         return;
       }
 
-      const currentUser = data?.user ?? null;
+      currentUser = currentUserResponse.data?.user ?? null;
       setUser(currentUser);
 
       if (currentUser) {
+        persistSessionHint();
         const currentProfile = await ensureUserProfile(currentUser);
         await loadAppData(currentUser, currentProfile);
+      } else {
+        clearSessionHint();
       }
 
       setAuthReady(true);
     };
 
     initialize().catch(() => {
+      clearSessionHint();
       setAuthReady(true);
     });
 
@@ -1251,14 +1329,43 @@ export function AppProvider({ children }) {
       setPendingRequests(nextRequests);
     };
 
+    const handleIncomingApprovalRequest = (payload) => {
+      if (cancelled || payload?.status !== "pending") {
+        return;
+      }
+
+      const nextRequest = mapApprovalRequest(payload, lang);
+
+      setPendingRequests((currentRequests) => {
+        const remainingRequests = currentRequests.filter((entry) => entry.id !== nextRequest.id);
+        return [nextRequest, ...remainingRequests].sort(
+          (left, right) => new Date(right.requestedAt ?? 0).getTime() - new Date(left.requestedAt ?? 0).getTime(),
+        );
+      });
+
+      if (nextRequest.id !== latestPendingToastRef.current) {
+        addNotification(nextRequest.title, nextRequest.detail);
+        showApprovalToast(nextRequest, "incoming");
+        latestPendingToastRef.current = nextRequest.id;
+      }
+    };
+
+    insforge.realtime.on(APPROVAL_REQUEST_EVENT, handleIncomingApprovalRequest);
+
+    void insforge.realtime
+      .connect()
+      .then(() => insforge.realtime.subscribe(APPROVAL_REQUESTS_CHANNEL))
+      .catch(() => {});
+
     void syncRequests();
     const intervalId = window.setInterval(() => {
       void syncRequests();
-    }, 7000);
+    }, 2500);
 
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
+      insforge.realtime.off(APPROVAL_REQUEST_EVENT, handleIncomingApprovalRequest);
     };
   }, [lang, normalizedRole, showApprovalToast, theme, user]);
 
@@ -1760,6 +1867,13 @@ export function AppProvider({ children }) {
     if (error) {
       return null;
     }
+    if (data) {
+      void insforge.realtime
+        .connect()
+        .then(() => insforge.realtime.subscribe(APPROVAL_REQUESTS_CHANNEL))
+        .then(() => insforge.realtime.publish(APPROVAL_REQUESTS_CHANNEL, APPROVAL_REQUEST_EVENT, data))
+        .catch(() => {});
+    }
     const { agentProfile, intent, requiresApproval } = buildAssistantContext(transcript || detail);
     void notifyN8nApprovalWorkflow({
       requestId: payload.id,
@@ -2125,11 +2239,13 @@ export function AppProvider({ children }) {
       return { ok: false };
     }
 
+    persistSessionHint();
     setUser(data.user);
     const currentProfile = await ensureUserProfile(data.user);
 
     if (currentProfile?.disabled) {
       await insforge.auth.signOut();
+      clearSessionHint();
       setUser(null);
       setProfile(null);
       setAuthBusy(false);
@@ -2151,6 +2267,7 @@ export function AppProvider({ children }) {
 
   const signOut = async () => {
     await insforge.auth.signOut();
+    clearSessionHint();
     setUser(null);
     setProfile(null);
     setInventoryItems(INVENTORY_ITEMS);
@@ -2347,6 +2464,7 @@ export function AppProvider({ children }) {
       title: lang === "es" ? "Solicitud aprobada" : "Request approved",
       description: request.operatorName,
     });
+    sileo.dismiss(getApprovalToastId(requestId));
     setPendingRequests((currentRequests) => currentRequests.filter((item) => item.id !== requestId));
     setNotificationsOpen(false);
   };
@@ -2379,6 +2497,7 @@ export function AppProvider({ children }) {
       title: lang === "es" ? "Solicitud denegada" : "Request denied",
       description: request.operatorName,
     });
+    sileo.dismiss(getApprovalToastId(requestId));
     setPendingRequests((currentRequests) => currentRequests.filter((item) => item.id !== requestId));
     setNotificationsOpen(false);
   };

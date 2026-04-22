@@ -24,6 +24,15 @@ import ProtectedRoute from "./routes/ProtectedRoute.jsx";
 // ─── Estilos globales ────────────────────────────────────────────────────────
 import "./index.css";
 
+function hasSessionRecoveryHint() {
+  const hasCsrfCookie = document.cookie.includes("insforge_csrf_token=");
+  const hasLocalAuthHint =
+    window.localStorage.getItem("mercedes-auth-active") === "true" ||
+    window.sessionStorage.getItem("mercedes-auth-active") === "true";
+
+  return hasCsrfCookie || hasLocalAuthHint;
+}
+
 /**
  * registerDynamicManifest
  *
@@ -198,13 +207,13 @@ if ("serviceWorker" in navigator) {
         // Si el usuario permanece en /login más de 12 s con cookie activa,
         // se intenta una recarga automática para recuperar sesión.
         const checkLoginStuck = () => {
-          const hasSessionCookie = document.cookie.includes("insforge_csrf_token=");
+          const hasSessionCookie = hasSessionRecoveryHint();
           
           // Solo aplica si parece haber sesión pero la UI sigue en login.
           if (window.location.pathname === "/login" && hasSessionCookie) {
             loginStuckTimer = setTimeout(() => {
               // Recarga solo si se mantiene en /login y la cookie sigue presente.
-              if (window.location.pathname === "/login" && document.cookie.includes("insforge_csrf_token=")) {
+              if (window.location.pathname === "/login" && hasSessionRecoveryHint()) {
                 window.location.reload();
               }
             }, 12000);

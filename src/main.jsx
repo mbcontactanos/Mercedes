@@ -34,25 +34,27 @@ import "./index.css";
  * start_url apunta a /camera?pwa=1 para abrir directamente la consola móvil.
  */
 function registerDynamicManifest() {
+  const currentUrl = new URL(window.location.href);
+  const buildAbsoluteUrl = (path) => new URL(path, currentUrl.origin).toString();
   const manifest = {
     name: "Mercedes Vitoria OPS",
     short_name: "Mercedes OPS",
     description: "PWA operativa para inventario, analisis, registros y camara industrial.",
-    start_url: "/camera?pwa=1",
-    scope: "/",
+    start_url: buildAbsoluteUrl("/camera?pwa=1"),
+    scope: buildAbsoluteUrl("/"),
     display: "standalone",
     orientation: "portrait-primary",
     background_color: "#050816",
     theme_color: "#050816",
     icons: [
       {
-        src: "/icons/icon-192.svg",
+        src: buildAbsoluteUrl("/icons/icon-192.svg"),
         sizes: "192x192",
         type: "image/svg+xml",
         purpose: "any maskable",
       },
       {
-        src: "/icons/icon-512.svg",
+        src: buildAbsoluteUrl("/icons/icon-512.svg"),
         sizes: "512x512",
         type: "image/svg+xml",
         purpose: "any maskable",
@@ -95,7 +97,7 @@ function registerDynamicManifest() {
  *
  * Nota: AppShell aplica control de acceso por rol.
  */
-function AplicacionRaiz() {
+function AppFrame() {
   // Obtiene tema y desplazamiento del toaster desde estado global.
   const { theme, toasterOffset } = useAppContext();
 
@@ -144,13 +146,23 @@ function AplicacionRaiz() {
   );
 }
 
+function AplicacionRaiz() {
+  return (
+    <AppProvider>
+      <AppFrame />
+    </AppProvider>
+  );
+}
+
 // ─── Montaje raíz de React ───────────────────────────────────────────────────
 // Renderiza la aplicación completa en #root y envuelve todo con AppProvider.
-ReactDOM.createRoot(document.getElementById("root")).render(
+const rootElement = document.getElementById("root");
+const root = window.__mercedesOpsRoot ?? ReactDOM.createRoot(rootElement);
+window.__mercedesOpsRoot = root;
+
+root.render(
   <React.StrictMode>
-    <AppProvider>
-      <AplicacionRaiz />
-    </AppProvider>
+    <AplicacionRaiz />
   </React.StrictMode>,
 );
 

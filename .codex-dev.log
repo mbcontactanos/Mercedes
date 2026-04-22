@@ -1,0 +1,24 @@
+[2m13:37:10[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m Re-optimizing dependencies because vite config has changed
+
+  [32m[1mVITE[22m v8.0.3[39m  [2mready in [0m[1m1740[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m3000[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://100.112.103.56:[1m3000[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://10.5.0.2:[1m3000[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://172.27.176.1:[1m3000[22m/[39m
+  [32m➜[39m  [1mNetwork[22m: [36mhttp://10.254.237.157:[1m3000[22m/[39m
+[2m13:43:49[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/context/AppContext.jsx, /src/components/dashboard/MobileOperatorConsole.jsx, /src/index.css[22m
+[2m13:43:49[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/index.css, /src/components/layout/TopBar.jsx[22m
+[2m13:43:49[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/context/AppContext.jsx, /src/index.css[22m
+[2m13:43:50[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [33mhmr invalidate [39m[2m/src/context/AppContext.jsx[22m Could not Fast Refresh ("AppContext" export is incompatible). Learn more at https://github.com/vitejs/vite-plugin-react/tree/main/packages/plugin-react#consistent-components-exports
+[2m13:43:50[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/main.jsx, /src/pages/home/page.jsx, /src/pages/inventory/page.jsx, /src/routes/AppShell.jsx, /src/pages/settings/page.jsx, /src/pages/auth/page.jsx, /src/routes/ProtectedRoute.jsx, /src/pages/logs/page.jsx, /src/pages/camera/page.jsx, /src/pages/pieces/page.jsx[22m
+[2m13:45:32[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/dashboard/MobileOperatorConsole.jsx, /src/index.css[22m
+[2m13:48:09[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/dashboard/MobileOperatorConsole.jsx, /src/index.css[22m
+[2m13:48:49[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/dashboard/MobileOperatorConsole.jsx, /src/index.css[22m
+[2m13:49:57[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/dashboard/MobileOperatorConsole.jsx, /src/index.css[22m
+[2m13:50:22[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/dashboard/MobileOperatorConsole.jsx, /src/index.css[22m
+[2m13:50:45[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/dashboard/MobileOperatorConsole.jsx, /src/index.css[22m
+[2m13:51:10[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/dashboard/MobileOperatorConsole.jsx, /src/index.css[22m
+[2m13:51:23[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/dashboard/MobileOperatorConsole.jsx, /src/index.css[22m
+[2m13:51:38[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/dashboard/MobileOperatorConsole.jsx, /src/index.css[22m
+[2m13:52:28[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/components/dashboard/MobileOperatorConsole.jsx, /src/index.css[22m

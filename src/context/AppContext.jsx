@@ -23,7 +23,13 @@ import {
   QUICK_FILTERS,
   SYSTEM_LOGS,
 } from "../config/mercedes-data.js";
-import { ADMIN_PEER_ID } from "../config/realtime.js";
+import {
+  ADMIN_PEER_ID,
+  ADMIN_HUB_CHANNEL,
+  ADMIN_HUB_EVENT,
+  ADMIN_HUB_HEARTBEAT_MS,
+  createAdminPeerId,
+} from "../config/realtime.js";
 import { PART_REFERENCE_CATALOG } from "../config/parts-catalog.js";
 import { insforge, insforgeAdmin } from "../lib/insforge.js";
 
@@ -580,7 +586,10 @@ function createRoleBoundOperator(profile, lang) {
   };
 
   return {
-    id: operatorIdByRole[role] ?? `profile-${profile?.user_id ?? "guest"}`,
+    id:
+      String(profile?.assigned_operator_id ?? "").trim() ||
+      operatorIdByRole[role] ||
+      `profile-${profile?.user_id ?? "guest"}`,
     name: displayName,
     shift: roleLabel,
     connected: false,
@@ -591,6 +600,52 @@ function createRoleBoundOperator(profile, lang) {
     role,
     roleLabel,
   };
+}
+
+function buildAdminVisibleOperators(profileRows = [], operatorRows = [], lang) {
+  const normalizedOperatorRows = normalizeOperators(operatorRows);
+  const operatorById = new Map(normalizedOperatorRows.map((entry) => [entry.id, entry]));
+  const seenOperatorIds = new Set();
+  const profileOperators = profileRows
+    .filter((entry) => normalizeRole(entry.role) !== ROLE_KEYS.ADMIN)
+    .map((entry) => {
+      const roleOperator = createRoleBoundOperator(entry, lang);
+      const matchedOperator = operatorById.get(roleOperator.id);
+
+      return {
+        ...matchedOperator,
+        ...roleOperator,
+        name: entry.display_name ?? matchedOperator?.name ?? roleOperator.name,
+        shift: getRoleLabel(normalizeRole(entry.role), lang),
+        status:
+          entry.disabled
+            ? lang === "es"
+              ? "Deshabilitado"
+              : "Disabled"
+            : matchedOperator?.status ?? roleOperator.status,
+        connected: matchedOperator?.connected ?? false,
+        activity: matchedOperator?.activity ?? roleOperator.activity,
+        lastSeen: matchedOperator?.lastSeen ?? null,
+        deviceName: matchedOperator?.deviceName ?? "",
+        disabled: Boolean(entry.disabled),
+        role: normalizeRole(entry.role),
+      };
+    })
+    .filter((entry) => {
+      if (seenOperatorIds.has(entry.id)) {
+        return false;
+      }
+
+      seenOperatorIds.add(entry.id);
+      return true;
+    });
+
+  if (profileOperators.length) {
+    const fallbackOperators = normalizedOperatorRows.filter((entry) => !seenOperatorIds.has(entry.id));
+    return [...profileOperators, ...fallbackOperators];
+  }
+
+  return normalizedOperatorRows.length ? normalizedOperatorRows : INITIAL_MOBILE_OPERATORS;
 }
 
 function buildSessionMemory({ detections, lang, messages, profile, statusMessage }) {
@@ -822,6 +877,7 @@ export function AppProvider({ children }) {
   const [adminUsers, setAdminUsers] = useState([]);
   const recognitionRef = useRef(null);
   const adminPeerRef = useRef(null);
+  const adminHubHeartbeatRef = useRef(0);
   const operatorConnectionsRef = useRef({});
   const operatorCallsRef = useRef({});
   const approveRequestRef = useRef(null);
@@ -835,31 +891,19 @@ export function AppProvider({ children }) {
       return;
     }
 
-    const dismissAfterAction = async (action) => {
-      if (action === "approve") {
-        await approveRequestRef.current?.(request.id);
-      } else {
-        await denyRequestRef.current?.(request.id);
-      }
-    };
-
-    sileo.action({
-      title: lang === "es" ? "Centro de aprobaciones" : "Approval center",
-      description: (
-        <ApprovalToastContent
-          approvalPolicy={request.approvalPolicy}
-          detail={request.transcript || request.detail}
-          lang={lang}
-          onApprove={() => void dismissAfterAction("approve")}
-          onDeny={() => void dismissAfterAction("deny")}
-          operatorName={request.operatorName}
-          requesterRoleLabel={request.requesterRoleLabel ?? request.approvalPolicy}
-        />
-      ),
-      duration: 3000,
+    sileo.show({
+      title:
+        reason === "incoming"
+          ? lang === "es"
+            ? "Nueva solicitud pendiente"
+            : "New pending request"
+          : lang === "es"
+            ? "Centro de aprobaciones"
+            : "Approval center",
+      description: `${request.operatorName} · ${request.transcript || request.detail}`,
+      duration: 4500,
       fill: theme === "dark" ? "#11161d" : "#ffffff",
       roundness: 24,
-      autopilot: false,
     });
   }, [lang, theme]);
 
@@ -938,8 +982,23 @@ export function AppProvider({ children }) {
       return;
     }
 
-    // Importante: leer solo perfiles del proyecto desde user_profiles.
-    // Evita mezclar usuarios externos que pueden aparecer en RPC globales.
+    const rpcResponse = await insforge.database.rpc("admin_list_users");
+
+    if (rpcResponse.data?.length) {
+      setAdminUsers(
+        dedupeAdminUsers(
+          rpcResponse.data.map((entry) =>
+            mapAdminUserRecord({
+              ...entry,
+              has_profile: entry.has_profile ?? true,
+            }),
+          ),
+        ),
+      );
+      return;
+    }
+
+    // Fallback para entornos donde la RPC todavia no este desplegada.
     const response = await insforge.database
       .from("user_profiles")
       .select("*")
@@ -991,11 +1050,12 @@ export function AppProvider({ children }) {
       return;
     }
 
-    const [inventoryResponse, catalogResponse, logsResponse, operatorsResponse] = await Promise.all([
+    const [inventoryResponse, catalogResponse, logsResponse, operatorsResponse, profilesResponse] = await Promise.all([
       insforge.database.from("inventory_items").select("*").order("id", { ascending: true }),
       insforge.database.from("part_reference_catalog").select("*").order("id", { ascending: true }),
       insforge.database.from("system_logs").select("*").order("created_at", { ascending: false }),
       insforge.database.from("operators").select("*").order("id", { ascending: true }),
+      insforge.database.from("user_profiles").select("*").order("created_at", { ascending: false }),
     ]);
 
     if (inventoryResponse.data?.length) {
@@ -1006,15 +1066,33 @@ export function AppProvider({ children }) {
       setSystemLogs(normalizeSystemLogs(logsResponse.data));
     }
 
-    if (operatorsResponse.data?.length) {
+    const profileRows = profilesResponse.data ?? [];
+    const operatorRows = operatorsResponse.data ?? [];
+    const visibleOperators =
+      normalizeRole(currentProfile?.role) === ROLE_KEYS.ADMIN
+        ? buildAdminVisibleOperators(profileRows, operatorRows, lang)
+        : buildVisibleOperators(operatorRows, currentProfile);
+
+    if (visibleOperators.length) {
+      setMobileOperators(visibleOperators);
+    }
+
+    if (normalizeRole(currentProfile?.role) === ROLE_KEYS.ADMIN) {
       setOperators(
-        operatorsResponse.data.map((entry) => ({
+        visibleOperators.map((entry) => ({
+          name: entry.name,
+          shift: entry.shift,
+          status: entry.status ?? "",
+        })),
+      );
+    } else if (operatorRows.length) {
+      setOperators(
+        operatorRows.map((entry) => ({
           name: entry.name,
           shift: entry.shift,
           status: entry.status,
         })),
       );
-      setMobileOperators(buildVisibleOperators(operatorsResponse.data, currentProfile));
     }
 
     await loadAdminUsers(currentProfile);
@@ -1250,13 +1328,32 @@ export function AppProvider({ children }) {
 
   useEffect(() => {
     if (!user || normalizedRole !== ROLE_KEYS.ADMIN || isMobileDevice) {
+      window.clearInterval(adminHubHeartbeatRef.current);
+      adminHubHeartbeatRef.current = 0;
       adminPeerRef.current?.destroy();
       adminPeerRef.current = null;
       setAdminHubReady(false);
       return;
     }
 
-    const adminPeer = new Peer(ADMIN_PEER_ID);
+    const adminPeerId = ADMIN_PEER_ID;
+    const publishAdminHubPresence = async (status = "online") => {
+      try {
+        await insforge.realtime.connect();
+        await insforge.realtime.subscribe(ADMIN_HUB_CHANNEL);
+        await insforge.realtime.publish(ADMIN_HUB_CHANNEL, ADMIN_HUB_EVENT, {
+          peerId: adminPeerId,
+          status,
+          timestamp: Date.now(),
+          userId: user.id,
+          operatorName: profile?.display_name ?? user?.email ?? "Admin",
+        });
+      } catch {
+        // La presencia realtime es best-effort; el hub WebRTC puede seguir vivo sin ella.
+      }
+    };
+
+    const adminPeer = new Peer(adminPeerId);
     adminPeerRef.current = adminPeer;
 
     const updateOperator = (operatorId, updates) => {
@@ -1286,7 +1383,12 @@ export function AppProvider({ children }) {
     adminPeer.on("open", () => {
       setAdminHubReady(true);
       setStatusMessage(lang === "es" ? "Hub admin conectado" : "Admin hub connected");
-      addNotification(lang === "es" ? "Hub admin conectado" : "Admin hub connected", ADMIN_PEER_ID);
+      addNotification(lang === "es" ? "Hub admin conectado" : "Admin hub connected", adminPeerId);
+      void publishAdminHubPresence("online");
+      window.clearInterval(adminHubHeartbeatRef.current);
+      adminHubHeartbeatRef.current = window.setInterval(() => {
+        void publishAdminHubPresence("online");
+      }, ADMIN_HUB_HEARTBEAT_MS);
     });
 
     adminPeer.on("connection", (connection) => {
@@ -1372,6 +1474,9 @@ export function AppProvider({ children }) {
     });
 
     return () => {
+      window.clearInterval(adminHubHeartbeatRef.current);
+      adminHubHeartbeatRef.current = 0;
+      void publishAdminHubPresence("offline");
       Object.values(operatorConnectionsRef.current).forEach((connection) => connection?.close?.());
       Object.values(operatorCallsRef.current).forEach((call) => call?.close?.());
       operatorConnectionsRef.current = {};
@@ -1380,7 +1485,7 @@ export function AppProvider({ children }) {
       adminPeerRef.current = null;
       setAdminHubReady(false);
     };
-  }, [isMobileDevice, lang, normalizedRole, user]);
+  }, [isMobileDevice, lang, normalizedRole, profile?.display_name, user]);
 
   const metrics = useMemo(() => {
     const detectedPieces = detections.filter(

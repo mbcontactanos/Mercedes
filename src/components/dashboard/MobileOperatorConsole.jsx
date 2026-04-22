@@ -2,7 +2,14 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Peer from "peerjs";
 import { Camera, LoaderCircle, Video, VideoOff, WandSparkles } from "lucide-react";
 import { sileo } from "sileo";
-import { ADMIN_PEER_ID } from "../../config/realtime.js";
+import {
+  ADMIN_PEER_ID,
+  ADMIN_HUB_CHANNEL,
+  ADMIN_HUB_EVENT,
+  ADMIN_HUB_HEARTBEAT_MS,
+  LEGACY_ADMIN_PEER_ID,
+  isAdminHubFresh,
+} from "../../config/realtime.js";
 import { insforge } from "../../lib/insforge.js";
 
 function createDatabaseUuid() {
@@ -26,6 +33,7 @@ const COPY = {
     autoStopped: "Modo de trabajo desconectado al ocultarse o bloquearse la app",
     denied: "Solicitud denegada por el admin",
     approved: "Solicitud aprobada por el admin",
+    hubUnavailable: "No hay ningun desktop admin disponible para recibir la camara.",
     permissionError: "No se pudo abrir la camara del movil.",
     unsupported: "Este dispositivo no expone una camara compatible en navegador.",
     connecting: "Conectando",
@@ -52,6 +60,7 @@ const COPY = {
     autoStopped: "Work mode disconnected when the app was hidden or locked",
     denied: "Request denied by admin",
     approved: "Request approved by admin",
+    hubUnavailable: "There is no admin desktop available to receive the camera stream.",
     permissionError: "The phone camera could not be opened.",
     unsupported: "This device does not expose a compatible browser camera.",
     connecting: "Connecting",
@@ -135,8 +144,9 @@ export default function ConsolaOperarioMovil({
   );
   const previewRef = useRef(null);
   const peerRef = useRef(null);
-  const callRef = useRef(null);
-  const connectionRef = useRef(null);
+  const callsRef = useRef({});
+  const connectionsRef = useRef({});
+  const availableAdminHubsRef = useRef({});
   const streamRef = useRef(null);
   const heartbeatRef = useRef(0);
   const wakeLockRef = useRef(null);
@@ -185,25 +195,106 @@ export default function ConsolaOperarioMovil({
   }, [activeOperator.id]);
 
   const sendToAdmin = (payload) => {
-    if (connectionRef.current?.open) {
-      connectionRef.current.send({
-        operatorId: activeOperatorRef.current?.id,
-        operatorName: activeOperatorRef.current?.name,
-        shift: activeOperatorRef.current?.shift,
-        timestamp: Date.now(),
-        ...payload,
-      });
-    }
+    const envelope = {
+      operatorId: activeOperatorRef.current?.id,
+      operatorName: activeOperatorRef.current?.name,
+      shift: activeOperatorRef.current?.shift,
+      timestamp: Date.now(),
+      ...payload,
+    };
+
+    Object.values(connectionsRef.current).forEach((connection) => {
+      if (connection?.open) {
+        connection.send(envelope);
+      }
+    });
   };
+
+  const getAvailableAdminPeerIds = (allowLegacy = true) => {
+    const freshPeerIds = Array.from(
+      new Set(
+        Object.values(availableAdminHubsRef.current)
+          .filter((entry) => isAdminHubFresh(entry))
+          .sort((left, right) => Number(right.timestamp ?? 0) - Number(left.timestamp ?? 0))
+          .map((entry) => entry.peerId),
+      ),
+    );
+
+    if (freshPeerIds.length || !allowLegacy) {
+      return freshPeerIds;
+    }
+
+    return Array.from(new Set([ADMIN_PEER_ID, LEGACY_ADMIN_PEER_ID].filter(Boolean)));
+  };
+
+  const waitForAdminPeerIds = async (timeoutMs = 3500) => {
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+      const peerIds = getAvailableAdminPeerIds(false);
+
+      if (peerIds.length) {
+        return peerIds;
+      }
+
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    }
+
+    return getAvailableAdminPeerIds(true);
+  };
+
+  useEffect(() => {
+    const pruneStaleHubs = () => {
+      Object.keys(availableAdminHubsRef.current).forEach((peerId) => {
+        if (!isAdminHubFresh(availableAdminHubsRef.current[peerId])) {
+          delete availableAdminHubsRef.current[peerId];
+        }
+      });
+    };
+
+    const handleHubPresence = (payload) => {
+      const peerId = payload?.peerId;
+
+      if (!peerId) {
+        return;
+      }
+
+      if (payload.status === "offline") {
+        delete availableAdminHubsRef.current[peerId];
+      } else {
+        availableAdminHubsRef.current[peerId] = payload;
+      }
+
+      pruneStaleHubs();
+    };
+
+    const connectRealtime = async () => {
+      try {
+        await insforge.realtime.connect();
+        await insforge.realtime.subscribe(ADMIN_HUB_CHANNEL);
+      } catch {
+        // Si realtime falla, mantenemos el fallback legacy para el hub admin.
+      }
+    };
+
+    insforge.realtime.on(ADMIN_HUB_EVENT, handleHubPresence);
+    void connectRealtime();
+    const pruneIntervalId = window.setInterval(pruneStaleHubs, ADMIN_HUB_HEARTBEAT_MS);
+
+    return () => {
+      window.clearInterval(pruneIntervalId);
+      insforge.realtime.off(ADMIN_HUB_EVENT, handleHubPresence);
+    };
+  }, []);
 
   const clearTransport = () => {
     window.clearInterval(heartbeatRef.current);
     heartbeatRef.current = 0;
-    callRef.current?.close();
-    connectionRef.current?.close();
+    Object.values(callsRef.current).forEach((call) => call?.close?.());
+    Object.values(connectionsRef.current).forEach((connection) => connection?.close?.());
     peerRef.current?.destroy();
-    callRef.current = null;
-    connectionRef.current = null;
+    callsRef.current = {};
+    connectionsRef.current = {};
     peerRef.current = null;
   };
 
@@ -436,6 +527,15 @@ export default function ConsolaOperarioMovil({
     onStatusChange(copy.connecting);
 
     try {
+      const adminPeerIds = await waitForAdminPeerIds();
+
+      if (!adminPeerIds.length) {
+        setErrorMessage(copy.hubUnavailable);
+        setIsConnecting(false);
+        onStatusChange(copy.hubUnavailable);
+        return;
+      }
+
       const stream = await openMobileCameraStream();
 
       streamRef.current = stream;
@@ -448,35 +548,22 @@ export default function ConsolaOperarioMovil({
       peerRef.current = peer;
 
       peer.on("open", () => {
-        const connection = peer.connect(ADMIN_PEER_ID, {
-          metadata: {
-            operatorId: activeOperator.id,
-            operatorName: activeOperator.name,
-            shift: activeOperator.shift,
-            role: roleKey,
-          },
-        });
+        let connectedAdmins = 0;
+        let resolvedAdmins = 0;
 
-        connectionRef.current = connection;
+        const registerConnectionFailure = async () => {
+          resolvedAdmins += 1;
 
-        connection.on("open", () => {
-          connection.on("data", handleAdminMessage);
+          if (!connectedAdmins && resolvedAdmins >= adminPeerIds.length) {
+            setErrorMessage(copy.hubUnavailable);
+            setIsConnecting(false);
+            onStatusChange(copy.hubUnavailable);
+            await stopBroadcast();
+          }
+        };
 
-          sendToAdmin({
-            type: "operator:ready",
-            activity: lang === "es" ? "Revisando expediciones en movil" : "Reviewing outbound flow on mobile",
-            deviceName: navigator.userAgent,
-            role: roleKey,
-          });
-
-          heartbeatRef.current = window.setInterval(() => {
-            sendToAdmin({
-              type: "operator:heartbeat",
-              activity: lang === "es" ? "Camara movil activa" : "Mobile camera active",
-            });
-          }, 8000);
-
-          callRef.current = peer.call(ADMIN_PEER_ID, stream, {
+        adminPeerIds.forEach((adminPeerId) => {
+          const connection = peer.connect(adminPeerId, {
             metadata: {
               operatorId: activeOperator.id,
               operatorName: activeOperator.name,
@@ -485,37 +572,79 @@ export default function ConsolaOperarioMovil({
             },
           });
 
-          setIsBroadcasting(true);
-          setIsConnecting(false);
-          onStatusChange(copy.connected);
-          void requestWakeLock();
-          void logSystemEvent(
-            "operator:started",
-            `${activeOperator.name} started the work mode from the mobile console.`,
-          );
-          sileo.success({
+          connectionsRef.current[adminPeerId] = connection;
+
+        connection.on("open", () => {
+          connectedAdmins += 1;
+          resolvedAdmins += 1;
+          connection.on("data", handleAdminMessage);
+
+          connection.send({
+            operatorId: activeOperator.id,
+            operatorName: activeOperator.name,
+            shift: activeOperator.shift,
+            timestamp: Date.now(),
+            type: "operator:ready",
+            activity: lang === "es" ? "Revisando expediciones en movil" : "Reviewing outbound flow on mobile",
+            deviceName: navigator.userAgent,
+            role: roleKey,
+          });
+
+          callsRef.current[adminPeerId] = peer.call(adminPeerId, stream, {
+            metadata: {
+              operatorId: activeOperator.id,
+              operatorName: activeOperator.name,
+              shift: activeOperator.shift,
+              role: roleKey,
+            },
+          });
+
+          if (connectedAdmins === 1) {
+            heartbeatRef.current = window.setInterval(() => {
+              sendToAdmin({
+                type: "operator:heartbeat",
+                activity: lang === "es" ? "Camara movil activa" : "Mobile camera active",
+              });
+            }, 8000);
+
+            setIsBroadcasting(true);
+            setIsConnecting(false);
+            onStatusChange(copy.connected);
+            void requestWakeLock();
+            void logSystemEvent(
+              "operator:started",
+              `${activeOperator.name} started the work mode from the mobile console.`,
+            );
+            sileo.success({
             title: copy.connected,
             description: `${activeOperator.name} · ${activeOperator.shift}`,
-          });
+            });
+          }
         });
 
         connection.on("error", () => {
-          setErrorMessage(copy.permissionError);
-          setIsConnecting(false);
-          onStatusChange(copy.permissionError);
+          delete connectionsRef.current[adminPeerId];
+          delete callsRef.current[adminPeerId];
+          void registerConnectionFailure();
         });
 
         connection.on("close", () => {
-          setIsBroadcasting(false);
-          setIsConnecting(false);
-          void releaseWakeLock();
+          delete connectionsRef.current[adminPeerId];
+          delete callsRef.current[adminPeerId];
+
+          if (!Object.values(connectionsRef.current).some((entry) => entry?.open)) {
+            setIsBroadcasting(false);
+            setIsConnecting(false);
+            void releaseWakeLock();
+          }
         });
+      });
       });
 
       peer.on("error", () => {
-        setErrorMessage(copy.permissionError);
+        setErrorMessage(copy.hubUnavailable);
         setIsConnecting(false);
-        onStatusChange(copy.permissionError);
+        onStatusChange(copy.hubUnavailable);
       });
     } catch {
       setErrorMessage(copy.permissionError);

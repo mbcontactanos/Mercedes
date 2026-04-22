@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Bell, Download, Moon, Search, Sun } from "lucide-react";
+import { sileo } from "sileo";
 import { PAGE_COPY, SHELL_COPY } from "../../config/ui-copy.js";
 
 export default function BarraSuperior({
@@ -26,6 +27,7 @@ export default function BarraSuperior({
   const copy = PAGE_COPY[currentPage];
   const isDark = theme === "dark";
   const bellButtonRef = useRef(null);
+  const previousPendingCountRef = useRef(pendingRequests.length);
   const [bellRinging, setBellRinging] = useState(false);
   const [hideOnScroll, setHideOnScroll] = useState(false);
 
@@ -42,6 +44,14 @@ export default function BarraSuperior({
       window.clearTimeout(timeoutId);
     };
   }, [bellRinging]);
+
+  useEffect(() => {
+    if (pendingRequests.length > previousPendingCountRef.current) {
+      setBellRinging(true);
+    }
+
+    previousPendingCountRef.current = pendingRequests.length;
+  }, [pendingRequests.length]);
 
   useEffect(() => {
     const syncToasterOffset = () => {

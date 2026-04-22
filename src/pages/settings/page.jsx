@@ -64,6 +64,10 @@ const COPY = {
     creating: "Creando...",
     created: "Usuario creado",
     error: "No se pudo completar la accion.",
+    confirmTitle: "Confirmacion requerida",
+    confirmDelete: "Confirmar eliminacion",
+    confirmAdmin: "Confirmar alta admin",
+    cancel: "Cancelar",
   },
   en: {
     eyebrow: "ACCESS CONTROL",
@@ -89,6 +93,10 @@ const COPY = {
     creating: "Creating...",
     created: "User created",
     error: "The action could not be completed.",
+    confirmTitle: "Confirmation required",
+    confirmDelete: "Confirm deletion",
+    confirmAdmin: "Confirm admin creation",
+    cancel: "Cancel",
   },
 };
 
@@ -524,6 +532,35 @@ export default function SettingsPage() {
           {copy.empty}
         </section>
       )}
+
+      {confirmDialog ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 px-4">
+          <section className="w-full max-w-[560px] rounded-[28px] border border-[#dee2e6] bg-white p-6 shadow-[0_24px_60px_rgba(15,23,42,0.24)] dark:border-[#2c3440] dark:bg-[#13171d]">
+            <p className="text-[11px] uppercase tracking-[0.32em] text-[#64748b] dark:text-[#8ea0b7]">{copy.confirmTitle}</p>
+            <h3 className="mt-2 text-xl font-semibold text-[#1a1a1a] dark:text-white">
+              {confirmDialog.type === "delete_user" ? copy.delete : copy.createTitle}
+            </h3>
+            <p className="mt-4 text-sm leading-6 text-[#64748b] dark:text-[#aab6c6]">{confirmDialog.message}</p>
+
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button
+                className="inline-flex items-center justify-center rounded-2xl border border-[#dee2e6] bg-white px-4 py-3 text-sm font-semibold text-[#1a1a1a] transition hover:bg-[#f8f9fa] dark:border-[#2c3440] dark:bg-[#11161d] dark:text-white dark:hover:bg-[#191f27]"
+                onClick={() => setConfirmDialog(null)}
+                type="button"
+              >
+                {copy.cancel}
+              </button>
+              <button
+                className="inline-flex items-center justify-center rounded-2xl bg-black px-4 py-3 text-sm font-semibold text-white transition hover:bg-neutral-800 dark:bg-white dark:text-black dark:hover:bg-[#dbe4ef]"
+                onClick={confirmDialog.type === "delete_user" ? confirmDelete : confirmCreateAdmin}
+                type="button"
+              >
+                {confirmDialog.type === "delete_user" ? copy.confirmDelete : copy.confirmAdmin}
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </div>
   );
 }

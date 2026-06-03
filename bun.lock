@@ -17,6 +17,7 @@
         "react-router-dom": "^7.14.1",
         "sileo": "^0.1.5",
         "tailwind-merge": "^3.5.0",
+        "zustand": "^5.0.14",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -589,6 +590,8 @@
     "yargs-parser": ["yargs-parser@20.2.9", "", {}, "sha512-y11nGElTIV+CT3Zv9t7VKl+Q3hTQoT9a1Qzezhhl6Rp21gJ/IVTW7Z3y9EWXhuUBC2Shnf+DX0antecpAwSP8w=="],
 
     "zod": ["zod@3.25.76", "", {}, "sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ=="],
+
+    "zustand": ["zustand@5.0.14", "", { "peerDependencies": { "@types/react": ">=18.0.0", "immer": ">=9.0.6", "react": ">=18.0.0", "use-sync-external-store": ">=1.2.0" }, "optionalPeers": ["@types/react", "immer", "react", "use-sync-external-store"] }, "sha512-/8tAspM5LMPr28b3fwLYrtdj77ECpfZviaP75CMTnwO8ISyaE4GDIG/9rDDYq/cH9D2Xw2A2RXglLInmVBQB/g=="],
 
     "@nextcloud/sharing/@nextcloud/files": ["@nextcloud/files@3.12.2", "", { "dependencies": { "@nextcloud/auth": "^2.5.3", "@nextcloud/capabilities": "^1.2.1", "@nextcloud/l10n": "^3.4.1", "@nextcloud/logger": "^3.0.3", "@nextcloud/paths": "^3.0.0", "@nextcloud/router": "^3.1.0", "@nextcloud/sharing": "^0.3.0", "cancelable-promise": "^4.3.1", "is-svg": "^6.1.0", "typescript-event-target": "^1.1.1", "webdav": "^5.8.0" } }, "sha512-vBo8tf3Xh6efiF8CrEo3pKj9AtvAF6RdDGO1XKL65IxV8+UUd9Uxl2lUExHlzoDRRczCqfGfaWfRRaFhYqce5Q=="],
 

@@ -6,7 +6,6 @@ export default function PanelDerecho({
   isCollapsed,
   items,
   lang,
-  onClearHistory,
   onFilterChange,
   onSendCommand,
   onToggleCollapsed,
@@ -38,9 +37,6 @@ export default function PanelDerecho({
         <div className="flex items-center justify-between">
           <h3 className="font-['Space_Grotesk'] text-[18px] font-bold text-[#1a1a1a] dark:text-white">{SHELL_COPY.liveActivity[lang]}</h3>
           <div className="flex items-center gap-3">
-            <button className="text-xs font-bold uppercase tracking-[0.14em] text-[#6c757d] dark:text-[#8ea0b7]" onClick={onClearHistory} type="button">
-              {SHELL_COPY.clearHistory[lang]}
-            </button>
             <button
               aria-label={lang === "es" ? "Ocultar actividad en vivo" : "Hide live activity"}
               className="flex h-10 w-10 items-center justify-center rounded-xl border border-[#dee2e6] bg-white text-[#1a1a1a] transition hover:bg-[#eef1f4] dark:border-[#2c3440] dark:bg-[#0f141a] dark:text-white dark:hover:bg-[#191f27]"

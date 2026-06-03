@@ -54,10 +54,6 @@ export const SHELL_COPY = {
     es: "Alertas",
     en: "Alerts",
   },
-  clearHistory: {
-    es: "Limpiar historial",
-    en: "Clear history",
-  },
   directCommand: {
     es: "Escriba un comando directo...",
     en: "Write a direct command...",

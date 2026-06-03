@@ -108,11 +108,17 @@ export function identifyPieceElement(detection, colorFeatures) {
   const sourceScore = detection.source === "tile" || detection.source === "zoom" ? 0.14 : 0.06;
   const toneScore = colorFeatures.toneLabel.startsWith("metal") ? 0.16 : 0.03;
   const elongationScore = elongation >= 3 ? 0.2 : elongation >= 2 ? 0.16 : elongation >= 1.3 ? 0.1 : 0.04;
-  const score = geometryScore + sizeScore + sourceScore + toneScore + elongationScore;
+  // La confianza del propio detector coco-ssd refuerza la heuristica geometrica.
+  const modelScore = detection.score >= 0.7 ? 0.12 : detection.score >= 0.5 ? 0.08 : detection.score >= 0.35 ? 0.04 : 0.01;
+  const score = geometryScore + sizeScore + sourceScore + toneScore + elongationScore + modelScore;
 
   if (score < 0.62) {
     return null;
   }
+
+  // Mezcla la puntuacion geometrica con la confianza del modelo (70/30) para una
+  // confianza final mas estable y representativa de la deteccion real.
+  const blendedConfidence = Math.min(0.99, score * 0.7 + (detection.score ?? 0) * 0.3);
 
   return {
     elementType: "pieza",
@@ -124,7 +130,7 @@ export function identifyPieceElement(detection, colorFeatures) {
     majorSidePx: Math.max(width, height),
     minorSidePx: Math.max(Math.min(width, height), 1),
     orientationAngle: axisDirection === "horizontal" ? 0 : axisDirection === "vertical" ? 90 : 18,
-    pieceConfidence: Math.min(0.99, Number(score.toFixed(2))),
+    pieceConfidence: Number(blendedConfidence.toFixed(2)),
     toneLabel: colorFeatures.toneLabel,
   };
 }

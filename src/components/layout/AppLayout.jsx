@@ -13,7 +13,6 @@ export default function AppLayout({
   notificationsOpen,
   pendingRequests,
   onApproveRequest,
-  onClearHistory,
   onFilterActivity,
   onInstall,
   onNavigate,

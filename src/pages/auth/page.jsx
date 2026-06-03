@@ -48,10 +48,7 @@ export default function AuthPage() {
     installReady,
     installSupport,
     isAuthenticated,
-    isMobileDevice,
     lang,
-    roleConfig,
-    roleKey,
     signIn,
     theme,
     toggleLang,
@@ -64,10 +61,11 @@ export default function AuthPage() {
   });
   // Controla si la contraseña se visualiza en texto plano.
   const [showPassword, setShowPassword] = useState(false);
-  // Controla si se muestra el error de campos vacíos tras un intento de envío.
-  const [showEmptyError, setShowEmptyError] = useState(false);
+  const [hasSubmitted, setHasSubmitted] = useState(false);
 
-  // Limpiar datos sensibles cuando se desmonta el componente o cuando se cierra la sesión
+  // Limpiar datos sensibles cuando se desmonta el componente o cuando se cierra la sesión.
+  // Debe declararse ANTES de cualquier return condicional: todos los hooks tienen que
+  // ejecutarse en el mismo orden en cada render (Rules of Hooks).
   useEffect(() => {
     return () => {
       // Limpiar datos sensibles al desmontar el componente
@@ -75,17 +73,15 @@ export default function AuthPage() {
     };
   }, []);
 
-  const redirectAfterAuth = isMobileDevice && roleKey !== "admin"
-    ? "/camera"
-    : roleConfig?.desktopDefaultRoute ?? "/";
-
   // Si la sesión ya está activa, evita volver a mostrar el login.
+  // Va despues de los hooks para no romper el orden de hooks al autenticarse.
   if (authReady && isAuthenticated) {
-    return <Navigate replace to={redirectAfterAuth} />;
+    return <Navigate replace to="/" />;
   }
 
   const handleSubmit = async (event) => {
     event.preventDefault();
+    setHasSubmitted(true);
     
     // Sanitización básica: elimina espacios al inicio y al final.
     const cleanEmail = formState.email.trim().toLowerCase();
@@ -94,12 +90,8 @@ export default function AuthPage() {
     // Validación de email y contraseña
     if (!cleanEmail || !cleanPassword) {
       // Mostrar error específico cuando los campos están vacíos
-      setShowEmptyError(true);
       return;
     }
-    
-    // Si llegamos aquí, los campos no están vacíos
-    setShowEmptyError(false);
 
     // Validación básica de formato de email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -117,7 +109,13 @@ export default function AuthPage() {
     if (result.ok) {
       // Limpiar datos sensibles del formulario tras login exitoso
       setFormState({ email: "", password: "" });
-      navigate(result.redirectTo ?? redirectAfterAuth, { replace: true });
+      setHasSubmitted(false);
+      
+      // Forzar una pequeña espera para asegurar que el estado de auth y perfil se propague
+      // y que roleConfig esté disponible antes de la navegación inicial.
+      setTimeout(() => {
+        navigate("/", { replace: true });
+      }, 100);
     }
   };
 
@@ -209,8 +207,8 @@ export default function AuthPage() {
             </div>
           </label>
 
-          {/* Validación de campos vacíos tras intento de envío */}
-          {showEmptyError && (!formState.email.trim() || !formState.password.trim()) ? (
+          {/* Validación de campos vacíos */}
+          {hasSubmitted && (!formState.email.trim() || !formState.password.trim()) ? (
             <p className="rounded-xl bg-[#fef2f2] px-4 py-3 text-sm text-[#dc2626]">
               {lang === "es" ? "Por favor completa todos los campos" : "Please fill in all fields"}
             </p>

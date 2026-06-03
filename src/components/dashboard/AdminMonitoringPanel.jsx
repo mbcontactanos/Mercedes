@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, MonitorSmartphone, ShieldCheck, Video, X } from "lucide-react";
 import { identifyPieceElement, sampleDetectionColor } from "../../lib/piece-detection.js";
+import { createJpegSnapshot } from "../../lib/media-capture.js";
 
 const COPY = {
   es: {
@@ -45,11 +46,26 @@ const COPY = {
   },
 };
 
-const DETECTION_INTERVAL_MS = 700;
-const MAX_BOXES = 12;
-const FULL_FRAME_MIN_SCORE = 0.2;
-const ZOOM_FRAME_MIN_SCORE = 0.1;
+const DETECTION_INTERVAL_MS = 1000;
+const MAX_BOXES = 6;
+const TRACK_IOU_MATCH = 0.3;
+const TRACK_SMOOTHING = 0.55;
+const FULL_FRAME_MIN_SCORE = 0.46;
+const ZOOM_FRAME_MIN_SCORE = 0.34;
 const ZOOM_CROP_RATIO = 0.68;
+
+const IGNORED_CLASSES = new Set([
+  "person",
+  "chair",
+  "couch",
+  "bed",
+  "dining table",
+  "tv",
+  "laptop",
+  "keyboard",
+  "cell phone",
+  "book",
+]);
 
 function normalizeDetection(rawDetection, frameWidth, frameHeight, copy, source) {
   const [x, y, width, height] = rawDetection.bbox;
@@ -155,6 +171,70 @@ function getVisualBoundingBox(detection) {
   ];
 }
 
+let trackSequence = 0;
+
+/**
+ * reconcileTracks
+ *
+ * Estabiliza las detecciones entre frames: empareja cada deteccion nueva con la
+ * mas cercana del frame anterior (mismo operario, misma clase, IoU > umbral) para
+ * asignarle un id estable y suavizar su bbox con una media exponencial. Esto evita
+ * el parpadeo de las cajas y los saltos bruscos sin retrasar la lectura en directo.
+ */
+function reconcileTracks(previousTracks, detections, now) {
+  const usedPrevious = new Set();
+  const nextTracks = [];
+
+  const stabilized = detections.map((detection) => {
+    let bestTrack = null;
+    let bestIoU = TRACK_IOU_MATCH;
+
+    previousTracks.forEach((track) => {
+      if (usedPrevious.has(track.id) || track.operatorId !== detection.operatorId || track.class !== detection.class) {
+        return;
+      }
+
+      const iou = computeIoU(track.bbox, detection.bbox);
+      if (iou > bestIoU) {
+        bestIoU = iou;
+        bestTrack = track;
+      }
+    });
+
+    let id;
+    let bbox;
+
+    if (bestTrack) {
+      usedPrevious.add(bestTrack.id);
+      id = bestTrack.id;
+      bbox = bestTrack.bbox.map((value, index) => value + (detection.bbox[index] - value) * TRACK_SMOOTHING);
+    } else {
+      trackSequence += 1;
+      id = `track-${detection.operatorId}-${trackSequence}`;
+      bbox = detection.bbox;
+    }
+
+    const stabilizedDetection = {
+      ...detection,
+      id,
+      bbox,
+      visualBbox: getVisualBoundingBox({ ...detection, bbox }),
+    };
+
+    nextTracks.push({
+      id,
+      operatorId: detection.operatorId,
+      class: detection.class,
+      bbox,
+      lastSeen: now,
+    });
+
+    return stabilizedDetection;
+  });
+
+  return { detections: stabilized, tracks: nextTracks };
+}
+
 function getOverlayTheme(detection) {
   if (detection.elementType === "pieza") {
     return {
@@ -196,6 +276,22 @@ function getOverlayLabel(detection) {
     confidenceLabel,
     coverageLabel,
   };
+}
+
+function isRelevantWarehouseDetection(detection, pieceMatch) {
+  if (pieceMatch?.pieceConfidence >= 0.62) {
+    return true;
+  }
+
+  if (IGNORED_CLASSES.has(String(detection.class ?? "").toLowerCase())) {
+    return false;
+  }
+
+  if (detection.score < 0.78) {
+    return false;
+  }
+
+  return detection.sizeKey === "tiny" || detection.sizeKey === "small";
 }
 
 async function detectZoomedObjects(model, video, canvas, copy) {
@@ -312,6 +408,7 @@ export default function PanelMonitoreoAdmin({
   const detectorTimerRef = useRef(null);
   const detectorCanvasRef = useRef(null);
   const isDetectingRef = useRef(false);
+  const trackedDetectionsRef = useRef([]);
   const cubosOperarios = useMemo(() => {
     const slots = [...mobileOperators];
 
@@ -347,6 +444,7 @@ export default function PanelMonitoreoAdmin({
 
   useEffect(() => {
     if (!adminHubReady) {
+      trackedDetectionsRef.current = [];
       onDetectionsChange([]);
       return undefined;
     }
@@ -359,6 +457,11 @@ export default function PanelMonitoreoAdmin({
       }
 
       const tf = await import("@tensorflow/tfjs");
+      try {
+        await tf.setBackend("webgl");
+      } catch {
+        // Si WebGL no esta disponible, tfjs cae al backend por defecto (CPU/WASM).
+      }
       await tf.ready();
       const cocoSsd = await import("@tensorflow-models/coco-ssd");
       modelRef.current = await cocoSsd.load({
@@ -372,9 +475,15 @@ export default function PanelMonitoreoAdmin({
         return;
       }
 
-      const liveEntries = cubosOperarios.filter((operator) => operatorStreams[operator.id]?.stream && !operator.esMarcador);
+      const liveEntries = cubosOperarios.filter(
+        (operator) =>
+          operator.id === selectedOperatorId &&
+          operatorStreams[operator.id]?.stream &&
+          !operator.esMarcador,
+      );
 
       if (!liveEntries.length) {
+        trackedDetectionsRef.current = [];
         onDetectionsChange([]);
         return;
       }
@@ -425,6 +534,7 @@ export default function PanelMonitoreoAdmin({
             analysisContext.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
           }
 
+          const sourceImageUrl = video ? createJpegSnapshot(video) : "";
           const enrichedDetections = mergedDetections.map((prediction) => {
             if (!analysisContext) {
               return prediction;
@@ -438,11 +548,17 @@ export default function PanelMonitoreoAdmin({
             );
             const pieceMatch = identifyPieceElement(prediction, colorFeatures);
 
+            if (!isRelevantWarehouseDetection(prediction, pieceMatch)) {
+              return null;
+            }
+
             return pieceMatch
               ? {
                   ...prediction,
                   ...pieceMatch,
                   displayLabel: pieceMatch.elementLabel,
+                  sourceImageUrl,
+                  captureUrl: sourceImageUrl,
                   visualBbox: getVisualBoundingBox({
                     ...prediction,
                     ...pieceMatch,
@@ -452,18 +568,27 @@ export default function PanelMonitoreoAdmin({
                   ...prediction,
                   toneLabel: colorFeatures.toneLabel,
                   displayLabel: prediction.class,
+                  sourceImageUrl,
+                  captureUrl: sourceImageUrl,
                   visualBbox: prediction.bbox,
                 };
-          });
+          }).filter(Boolean);
 
           nextDetections.push(...enrichedDetections);
         }
 
         if (!cancelled) {
-          onDetectionsChange(nextDetections);
+          const { detections: stabilizedDetections, tracks } = reconcileTracks(
+            trackedDetectionsRef.current,
+            nextDetections,
+            Date.now(),
+          );
+          trackedDetectionsRef.current = tracks;
+          onDetectionsChange(stabilizedDetections);
         }
       } catch {
         if (!cancelled) {
+          trackedDetectionsRef.current = [];
           onDetectionsChange([]);
         }
       } finally {
@@ -482,7 +607,7 @@ export default function PanelMonitoreoAdmin({
       detectorTimerRef.current = null;
       isDetectingRef.current = false;
     };
-  }, [adminHubReady, copy, cubosOperarios, onDetectionsChange, operatorStreams, videoRefs]);
+  }, [adminHubReady, copy, cubosOperarios, onDetectionsChange, operatorStreams, selectedOperatorId, videoRefs]);
 
   const operadorSeleccionado = cubosOperarios.find((operator) => operator.id === selectedOperatorId) ?? cubosOperarios[0];
   const streamSeleccionado = operadorSeleccionado ? operatorStreams[operadorSeleccionado.id] : null;
@@ -547,6 +672,7 @@ export default function PanelMonitoreoAdmin({
                   <video
                     autoPlay
                     className="h-full w-full object-cover"
+                    data-operator-selected="true"
                     muted
                     playsInline
                     ref={(node) => {

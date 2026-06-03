@@ -28,12 +28,27 @@ import {
   ADMIN_HUB_CHANNEL,
   ADMIN_HUB_EVENT,
   ADMIN_HUB_HEARTBEAT_MS,
+  ADMIN_OPERATOR_REQUEST_EVENT,
+  ADMIN_OPERATOR_REQUESTS_CHANNEL,
   APPROVAL_REQUEST_EVENT,
   APPROVAL_REQUESTS_CHANNEL,
   createAdminPeerId,
 } from "../config/realtime.js";
 import { PART_REFERENCE_CATALOG } from "../config/parts-catalog.js";
 import { insforge, insforgeAdmin } from "../lib/insforge.js";
+import { createJpegSnapshot as sharedCreateJpegSnapshot } from "../lib/media-capture.js";
+import {
+  buildMicrophoneConstraints as sharedBuildMicrophoneConstraints,
+  isMeaningfulVoiceTranscript as sharedIsMeaningfulVoiceTranscript,
+  normalizeWakeWordTranscript as sharedNormalizeWakeWordTranscript,
+  sanitizeVoiceTranscript as sharedSanitizeVoiceTranscript,
+} from "../lib/voice-assistant.js";
+import {
+  useSessionStore,
+  hasSessionHint as hasInsforgeSessionHint,
+  persistSessionHint,
+  clearSessionHint,
+} from "../store/sessionStore.js";
 
 export const AppContext = createContext(null);
 
@@ -66,66 +81,77 @@ const INITIAL_NOTIFICATIONS = {
   ],
 };
 
-const INITIAL_ACTIVITY_ITEMS = {
-  es: [
-    {
-      id: "activity-1",
-      category: "all",
-      title: "Caja 84 localizada en el pasillo A3",
-      time: "Hace 3 min",
-      detail: "Verificacion por lector de inventario y confirmacion del sistema de picking.",
-      source: "ORIGEN: OPERADOR_02",
-      dot: "bg-black",
-      highlighted: true,
-    },
-    {
-      id: "activity-2",
+/**
+ * buildActivityFeed
+ *
+ * Construye el timeline lateral SOLO con datos reales del contexto operativo:
+ * solicitudes pendientes, piezas detectadas en directo y logs del sistema.
+ * No usa entradas mockup inventadas; si no hay datos reales el feed queda vacio.
+ */
+function buildActivityFeed({ systemLogs = [], detections = [], pendingRequests = [], lang = "es" } = {}) {
+  const feed = [];
+  const formatClock = (value) => {
+    if (!value) {
+      return lang === "es" ? "Ahora mismo" : "Just now";
+    }
+
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return String(value);
+    }
+
+    return parsed.toLocaleTimeString(lang === "es" ? "es-ES" : "en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  pendingRequests.slice(0, 3).forEach((request) => {
+    feed.push({
+      id: `activity-request-${request.id}`,
       category: "alerts",
-      title: "Pico de rendimiento detectado en Sector 7",
-      time: "Hace 12 min",
-      detail: "IA redirigiendo 4 agentes de clasificacion para compensar carga.",
-      dot: "bg-slate-400",
-    },
-    {
-      id: "activity-3",
-      category: "logs",
-      title: "Nuevo envio de alta prioridad llego al Muelle 03",
-      time: "Hace 28 min",
-      detail: "Prioridad Mercedes-AMG con confirmacion de escaneo y etiqueta roja.",
-      chips: ["MUELLE 03", "PRIORIDAD"],
-      dot: "bg-neutral-500",
-    },
-  ],
-  en: [
-    {
-      id: "activity-1",
-      category: "all",
-      title: "Box 84 located in aisle A3",
-      time: "3 min ago",
-      detail: "Verified by inventory scanner and confirmed by the picking system.",
-      source: "SOURCE: OPERATOR_02",
-      dot: "bg-black",
+      title: request.title ?? (lang === "es" ? "Solicitud pendiente" : "Pending request"),
+      detail: request.transcript || request.detail || "",
+      time: formatClock(request.requestedAt),
+      source: request.operatorName ? String(request.operatorName).toUpperCase() : undefined,
+      dot: "bg-amber-500",
       highlighted: true,
-    },
-    {
-      id: "activity-2",
-      category: "alerts",
-      title: "Performance spike detected in Sector 7",
-      time: "12 min ago",
-      detail: "AI is redirecting 4 sorting agents to balance the load.",
-      dot: "bg-slate-400",
-    },
-    {
-      id: "activity-3",
-      category: "logs",
-      title: "New high-priority shipment reached Dock 03",
-      time: "28 min ago",
-      detail: "Mercedes-AMG priority order with scan confirmation and red tag.",
-      chips: ["DOCK 03", "PRIORITY"],
-      dot: "bg-neutral-500",
-    },
-  ],
-};
+    });
+  });
+
+  detections.slice(0, 3).forEach((detection, index) => {
+    const label = detection.displayLabel ?? detection.elementLabel ?? detection.class;
+    const confidence = Math.round((detection.pieceConfidence ?? detection.score ?? 0) * 100);
+
+    feed.push({
+      id: `activity-detection-${detection.id ?? index}`,
+      category: "all",
+      title: lang === "es" ? `Pieza detectada: ${label}` : `Detected part: ${label}`,
+      detail:
+        lang === "es"
+          ? `Operario ${detection.operatorName ?? "movil"}. Confianza ${confidence}%.`
+          : `Operator ${detection.operatorName ?? "mobile"}. Confidence ${confidence}%.`,
+      time: lang === "es" ? "En directo" : "Live",
+      chips: detection.sizeLabel ? [detection.sizeLabel] : [],
+      dot: "bg-black",
+    });
+  });
+
+  systemLogs.slice(0, 8).forEach((log) => {
+    const isAlert = log.level === "ERROR" || log.level === "WARN";
+
+    feed.push({
+      id: `activity-log-${log.id}`,
+      category: isAlert ? "alerts" : "logs",
+      title: log.title,
+      detail: log.detail,
+      time: log.timestamp ?? formatClock(),
+      dot: log.level === "ERROR" ? "bg-rose-500" : log.level === "WARN" ? "bg-amber-500" : "bg-neutral-500",
+    });
+  });
+
+  return feed;
+}
 
 const INITIAL_MOBILE_OPERATORS = [
   {
@@ -170,6 +196,7 @@ function createDatabaseUuid() {
   return `${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
 }
 
+
 function normalizeWakeWordTranscript(transcript) {
   const cleanedTranscript = String(transcript ?? "")
     .normalize("NFKC")
@@ -192,6 +219,45 @@ function normalizeWakeWordTranscript(transcript) {
     commandTranscript: wakeWordMatch[2]?.trim() ?? "",
     wakeWordDetected: true,
   };
+}
+
+function sanitizeVoiceTranscript(transcript) {
+  const normalized = String(transcript ?? "")
+    .normalize("NFKC")
+    .replace(/[.,;:!?¡¿]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!normalized) {
+    return "";
+  }
+
+  const dedupedWords = normalized.split(" ").filter((word, index, words) => {
+    const previousWord = words[index - 1];
+    return previousWord ? previousWord.toLowerCase() !== word.toLowerCase() : true;
+  });
+
+  return dedupedWords.join(" ").trim();
+}
+
+function isMeaningfulVoiceTranscript(transcript) {
+  const normalized = sanitizeVoiceTranscript(transcript);
+
+  if (!normalized) {
+    return false;
+  }
+
+  const lower = normalized.toLowerCase();
+
+  if (/^(omar|o mar|eh|ah|mm|mmm|um|uh|hmm)$/.test(lower)) {
+    return false;
+  }
+
+  if (normalized.split(" ").length === 1 && normalized.length < 5) {
+    return false;
+  }
+
+  return true;
 }
 
 function resolveKokoroEndpoint(voiceEndpoint) {
@@ -289,37 +355,6 @@ function detectMobileContext() {
     window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
 
   return window.matchMedia("(max-width: 1024px)").matches || isMobileUserAgent || (isTouchDevice && isStandalone);
-}
-
-function hasInsforgeSessionHint() {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  const hasCsrfCookie = document.cookie.includes("insforge_csrf_token=");
-  const hasLocalAuthHint =
-    window.localStorage.getItem("mercedes-auth-active") === "true" ||
-    window.sessionStorage.getItem("mercedes-auth-active") === "true";
-
-  return hasCsrfCookie || hasLocalAuthHint;
-}
-
-function persistSessionHint() {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.setItem("mercedes-auth-active", "true");
-  window.sessionStorage.setItem("mercedes-auth-active", "true");
-}
-
-function clearSessionHint() {
-  if (typeof window === "undefined") {
-    return;
-  }
-
-  window.localStorage.removeItem("mercedes-auth-active");
-  window.sessionStorage.removeItem("mercedes-auth-active");
 }
 
 function detectInstallSupport() {
@@ -759,6 +794,97 @@ async function notifyN8nApprovalWorkflow(payload) {
  * @param {object|null} workflowResponse - JSON parseado desde el webhook de n8n
  * @returns {Promise<boolean>} - true si el audio se reprodujo correctamente
  */
+/**
+ * playStreamingMp3
+ *
+ * Reproduce un stream mp3 de forma progresiva con MediaSource. El audio empieza
+ * al primer chunk recibido en vez de esperar la descarga completa, reduciendo el
+ * tiempo hasta el primer sonido (time-to-first-audio).
+ *
+ * @param {ReadableStream<Uint8Array>} stream - cuerpo de la respuesta TTS
+ * @param {() => void} onFirstChunk - callback al recibir el primer chunk (limpia timeout)
+ * @returns {Promise<boolean>} - true si la reproducción arrancó correctamente
+ */
+async function playStreamingMp3(stream, onFirstChunk) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (!settled) {
+        settled = true;
+        resolve(value);
+      }
+    };
+
+    const mediaSource = new MediaSource();
+    const objectUrl = URL.createObjectURL(mediaSource);
+    const audioEl = new Audio();
+    audioEl.preload = "auto";
+    audioEl.src = objectUrl;
+    audioEl.addEventListener("ended", () => URL.revokeObjectURL(objectUrl));
+    audioEl.addEventListener("error", () => finish(false));
+
+    mediaSource.addEventListener("sourceopen", async () => {
+      let sourceBuffer;
+      try {
+        sourceBuffer = mediaSource.addSourceBuffer("audio/mpeg");
+      } catch {
+        finish(false);
+        return;
+      }
+
+      const reader = stream.getReader();
+      const queue = [];
+      let reading = true;
+
+      const pump = () => {
+        if (!queue.length || sourceBuffer.updating) {
+          return;
+        }
+        try {
+          sourceBuffer.appendBuffer(queue.shift());
+        } catch {
+          finish(false);
+        }
+      };
+
+      sourceBuffer.addEventListener("updateend", () => {
+        pump();
+        if (!reading && !queue.length && !sourceBuffer.updating && mediaSource.readyState === "open") {
+          mediaSource.endOfStream();
+        }
+      });
+
+      let first = true;
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          if (first) {
+            first = false;
+            onFirstChunk?.();
+            audioEl.play().then(() => finish(true)).catch(() => finish(false));
+          }
+          queue.push(value);
+          pump();
+        }
+      } catch {
+        finish(false);
+      } finally {
+        reading = false;
+        if (!queue.length && !sourceBuffer.updating && mediaSource.readyState === "open") {
+          try {
+            mediaSource.endOfStream();
+          } catch {
+            // MediaSource ya cerrado; ignorar.
+          }
+        }
+      }
+    });
+  });
+}
+
 async function playWorkflowAudioIfAvailable(workflowResponse) {
   if (typeof window === "undefined" || !workflowResponse) {
     return false;
@@ -775,6 +901,7 @@ async function playWorkflowAudioIfAvailable(workflowResponse) {
   if (prebuiltAudioUrl && typeof Audio !== "undefined") {
     try {
       const audioEl = new Audio(prebuiltAudioUrl);
+      audioEl.preload = "auto";
       await audioEl.play();
       return true;
     } catch {
@@ -810,20 +937,41 @@ async function playWorkflowAudioIfAvailable(workflowResponse) {
         input: kokoroText,
         voice: workflowResponse.voice ?? "af_heart",
         response_format: "mp3",
-        stream: false,
-        return_download_link: true,
+        // stream:true → Kokoro envía chunks mp3 progresivos. Reproducción empieza
+        // al primer chunk vía MediaSource en vez de esperar el mp3 completo.
+        stream: true,
+        return_download_link: false,
         lang_code: responseLang === "es" ? "e" : "a",
       }),
       signal: abortController.signal,
     });
 
-    clearTimeout(timeoutHandle);
-
     if (!ttsResponse.ok) {
+      clearTimeout(timeoutHandle);
       return false;
     }
 
     const contentType = ttsResponse.headers.get("content-type") ?? "";
+
+    // ── Reproducción progresiva (streaming) ──────────────────────────────────
+    // Si la respuesta es audio en streaming y el navegador soporta MediaSource
+    // con mp3, se reproduce mientras descarga → menor tiempo al primer sonido.
+    if (
+      ttsResponse.body &&
+      (contentType.includes("audio/") || contentType.includes("application/octet-stream")) &&
+      typeof MediaSource !== "undefined" &&
+      MediaSource.isTypeSupported("audio/mpeg")
+    ) {
+      const streamed = await playStreamingMp3(ttsResponse.body, () => clearTimeout(timeoutHandle));
+      if (streamed) {
+        return true;
+      }
+      // Si el streaming falla, NO continúa: el body ya se consumió.
+      clearTimeout(timeoutHandle);
+      return false;
+    }
+
+    clearTimeout(timeoutHandle);
 
     let audioPlayUrl = null;
 
@@ -848,6 +996,7 @@ async function playWorkflowAudioIfAvailable(workflowResponse) {
 
     if (audioPlayUrl) {
       const audioEl = new Audio(audioPlayUrl);
+      audioEl.preload = "auto";
       await audioEl.play();
       // Libera la Blob URL tras reproducir para evitar consumo de memoria.
       audioEl.addEventListener("ended", () => {
@@ -872,11 +1021,16 @@ export function AppProvider({ children }) {
     top: 16,
     right: 16,
   });
-  const [authReady, setAuthReady] = useState(false);
-  const [authBusy, setAuthBusy] = useState(false);
-  const [authError, setAuthError] = useState("");
-  const [user, setUser] = useState(null);
-  const [profile, setProfile] = useState(null);
+  const authReady = useSessionStore((state) => state.authReady);
+  const authBusy = useSessionStore((state) => state.authBusy);
+  const authError = useSessionStore((state) => state.authError);
+  const user = useSessionStore((state) => state.user);
+  const profile = useSessionStore((state) => state.profile);
+  const setAuthReady = useSessionStore((state) => state.setAuthReady);
+  const setAuthBusy = useSessionStore((state) => state.setAuthBusy);
+  const setAuthError = useSessionStore((state) => state.setAuthError);
+  const setUser = useSessionStore((state) => state.setUser);
+  const setProfile = useSessionStore((state) => state.setProfile);
   const [lang, setLangState] = useState(() => window.localStorage.getItem("mercedes-lang") ?? "es");
   const [theme, setThemeState] = useState(() => window.localStorage.getItem("mercedes-theme") ?? "light");
   const [isMobileDevice, setIsMobileDevice] = useState(() => detectMobileContext());
@@ -894,7 +1048,6 @@ export function AppProvider({ children }) {
   const [installPromptVisible, setInstallPromptVisible] = useState(false);
   const [installEvent, setInstallEvent] = useState(null);
   const [installSupport, setInstallSupport] = useState(() => detectInstallSupport());
-  const [activityItems, setActivityItems] = useState(INITIAL_ACTIVITY_ITEMS.es);
   const [notificationItems, setNotificationItems] = useState(INITIAL_NOTIFICATIONS.es);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [pendingRequests, setPendingRequests] = useState([]);
@@ -1282,7 +1435,6 @@ export function AppProvider({ children }) {
 
   useEffect(() => {
     window.localStorage.setItem("mercedes-lang", lang);
-    setActivityItems(INITIAL_ACTIVITY_ITEMS[lang]);
     setNotificationItems((currentNotifications) =>
       currentNotifications.length ? currentNotifications : INITIAL_NOTIFICATIONS[lang],
     );
@@ -1515,6 +1667,17 @@ export function AppProvider({ children }) {
           role: payload.role,
         });
 
+        if (payload.captureUrl) {
+          setOperatorStreams((currentStreams) => ({
+            ...currentStreams,
+            [payload.operatorId]: {
+              ...(currentStreams[payload.operatorId] ?? {}),
+              captureUrl: payload.captureUrl,
+              updatedAt: payload.timestamp ?? Date.now(),
+            },
+          }));
+        }
+
         if (payload.type === "operator:request") {
           addNotification(payload.title, payload.detail);
           setNotificationsOpen(true);
@@ -1609,6 +1772,11 @@ export function AppProvider({ children }) {
       syncLabel: lang === "es" ? "Online y sincronizado" : "Online and synced",
     };
   }, [detections, inventoryItems, lang, operatorStreams, statusMessage]);
+
+  const activityItems = useMemo(
+    () => buildActivityFeed({ systemLogs, detections, pendingRequests, lang }),
+    [detections, lang, pendingRequests, systemLogs],
+  );
 
   const alerts = useMemo(() => {
     const lowStockItems = inventoryItems
@@ -1779,12 +1947,15 @@ export function AppProvider({ children }) {
     //   1. sourceImageUrl de la detección más reciente (TensorFlow en panel admin)
     //   2. captureFrame del stream más reciente del operario (captura base64)
     //   3. Cadena vacía (consulta solo texto)
-    const latestDetection = detections[0];
+    const activeVideoElement =
+      typeof document !== "undefined" ? document.querySelector("video[data-operator-selected='true']") : null;
+    const latestDetection = detections.find((entry) => entry.operatorId === activeOperatorId) ?? detections[0];
     const latestCaptureUrl =
       latestDetection?.sourceImageUrl ??
       latestDetection?.captureUrl ??
-      Object.values(operatorStreams)[0]?.captureUrl ??
-      "";
+      operatorStreams[activeOperatorId]?.captureUrl ??
+      Object.values(operatorStreams).find((entry) => entry?.captureUrl)?.captureUrl ??
+      sharedCreateJpegSnapshot(activeVideoElement);
 
     const workflowResponse = await notifyN8nApprovalWorkflow({
       requestId: `workflow-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`,
@@ -1928,6 +2099,8 @@ export function AppProvider({ children }) {
       return null;
     }
 
+    const realtimePayload = data ?? payload;
+
     operatorConnectionsRef.current[targetOperatorId]?.send?.({
       type: "admin:request",
       requestId: payload.id,
@@ -1936,12 +2109,24 @@ export function AppProvider({ children }) {
       transcript,
     });
 
+    void insforge.realtime
+      .connect()
+      .then(() => insforge.realtime.subscribe(ADMIN_OPERATOR_REQUESTS_CHANNEL))
+      .then(() =>
+        insforge.realtime.publish(
+          ADMIN_OPERATOR_REQUESTS_CHANNEL,
+          ADMIN_OPERATOR_REQUEST_EVENT,
+          realtimePayload,
+        ),
+      )
+      .catch(() => {});
+
     addNotification(
       lang === "es" ? "Solicitud enviada al operario" : "Request sent to operator",
       `${targetOperator?.name ?? targetOperatorId} · ${detail}`,
     );
 
-    return data ?? payload;
+    return realtimePayload;
   };
 
   const handleSendMessage = (event) => {
@@ -1971,6 +2156,7 @@ export function AppProvider({ children }) {
         transcript: cleanedValue,
       });
       const workflowAnswer = workflowResult?.workflowResponse?.assistantAnswer?.trim();
+      const audioPlaybackPromise = playWorkflowAudioIfAvailable(workflowResult?.workflowResponse);
       const inventoryReply = buildRealtimeInventoryReply({
         item: workflowResult?.resolvedInventoryItem ?? null,
         lang,
@@ -1987,7 +2173,6 @@ export function AppProvider({ children }) {
           ).length,
         },
       });
-      void playWorkflowAudioIfAvailable(workflowResult?.workflowResponse);
       const assistantMessage = {
         id: `assistant-${Date.now()}`,
         role: "assistant",
@@ -2008,12 +2193,15 @@ export function AppProvider({ children }) {
         intentKey: intent.key,
       };
 
+      await audioPlaybackPromise.catch(() => false);
       setMessages((currentMessages) => [...currentMessages, assistantMessage]);
       setStatusMessage(lang === "es" ? "Consulta atendida por n8n" : "Request handled by n8n");
     })();
 
     if (normalizedRole === ROLE_KEYS.ADMIN) {
-      const shouldCreateAdminInstruction = /^(envia|solicita|ordena|indica|pide)\b/i.test(cleanedValue);
+      const shouldCreateAdminInstruction = /^(envia|envía|solicita|ordena|indica|pide|avisa|notifica|manda)\b/i.test(
+        cleanedValue,
+      );
 
       if (shouldCreateAdminInstruction) {
         void createAdminRequest({
@@ -2049,7 +2237,7 @@ export function AppProvider({ children }) {
 
     if (navigator.mediaDevices?.getUserMedia) {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const stream = await navigator.mediaDevices.getUserMedia(sharedBuildMicrophoneConstraints());
         stream.getTracks().forEach((track) => track.stop());
       } catch {
         setStatusMessage(lang === "es" ? "No se ha concedido acceso al microfono" : "Microphone access was not granted");
@@ -2059,29 +2247,54 @@ export function AppProvider({ children }) {
 
     const recognition = new SpeechRecognition();
     let finalTranscript = "";
-    let partialTranscript = "";
+    let finalConfidence = 0;
+    let finalConfidenceSamples = 0;
     let requestSent = false;
+    let wakeWordArmed = false;
+    let restartAttempts = 0;
 
-    const submitTranscript = (rawTranscript) => {
-      const transcript = rawTranscript.trim() || "Resumen de stock";
-      const { cleanedTranscript, commandTranscript, wakeWordDetected } = normalizeWakeWordTranscript(transcript);
-      const effectiveTranscript = wakeWordDetected ? commandTranscript : cleanedTranscript;
+    const submitTranscript = (rawTranscript, confidence = 0) => {
+      const transcript = sharedSanitizeVoiceTranscript(rawTranscript);
+      const { cleanedTranscript, commandTranscript, wakeWordDetected } = sharedNormalizeWakeWordTranscript(transcript);
+      const effectiveTranscript = sharedSanitizeVoiceTranscript(
+        wakeWordDetected || wakeWordArmed ? commandTranscript || cleanedTranscript : cleanedTranscript,
+      );
 
       if (wakeWordDetected && !commandTranscript) {
+        wakeWordArmed = true;
+        finalTranscript = "";
+        finalConfidence = 0;
+        finalConfidenceSamples = 0;
         setStatusMessage(
           lang === "es" ? "Omar activado. Indica ahora la consulta completa." : "Omar activated. Say the full request now.",
         );
-        return;
+        return false;
       }
 
-      if (!effectiveTranscript || requestSent) {
+      if (!sharedIsMeaningfulVoiceTranscript(effectiveTranscript) || requestSent) {
         if (!effectiveTranscript) {
-          setStatusMessage(lang === "es" ? "No se ha detectado una consulta valida." : "No valid request was detected.");
+          setStatusMessage(lang === "es" ? "No se ha detectado ninguna orden de voz." : "No voice command was detected.");
+        } else {
+          setStatusMessage(
+            lang === "es"
+              ? "La orden de voz es demasiado corta o ambigua. Intentalo de nuevo."
+              : "The voice command is too short or ambiguous. Please try again.",
+          );
         }
-        return;
+        return false;
+      }
+
+      if (confidence > 0 && confidence < 0.45) {
+        setStatusMessage(
+          lang === "es"
+            ? "La captacion de voz ha sido poco fiable. Acercate al microfono e intentalo de nuevo."
+            : "Voice capture was not reliable enough. Move closer to the microphone and try again.",
+        );
+        return false;
       }
 
       requestSent = true;
+      wakeWordArmed = false;
       const { agentProfile, intent, requiresApproval } = buildAssistantContext(effectiveTranscript);
       const voiceUserMessage = {
         id: `voice-user-${Date.now()}`,
@@ -2160,39 +2373,75 @@ export function AppProvider({ children }) {
           transcript: effectiveTranscript,
         });
       }
+
+      return true;
     };
 
     recognition.lang = lang === "es" ? "es-ES" : "en-US";
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.maxAlternatives = 1;
+    recognition.continuous = true;
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 3;
     recognition.onstart = () => setIsListening(true);
     recognition.onend = () => {
       setIsListening(false);
+      if (requestSent) {
+        recognitionRef.current = null;
+        return;
+      }
+
+      if (wakeWordArmed && restartAttempts < 1) {
+        restartAttempts += 1;
+        try {
+          recognition.start();
+          setIsListening(true);
+          return;
+        } catch {
+          // Si el navegador no permite reiniciar, cae al flujo normal.
+        }
+      }
+
       recognitionRef.current = null;
 
-      if (!requestSent) {
-        submitTranscript(finalTranscript || partialTranscript);
+      if (!requestSent && finalTranscript) {
+        const averageConfidence =
+          finalConfidenceSamples > 0 ? finalConfidence / finalConfidenceSamples : 0;
+        submitTranscript(finalTranscript, averageConfidence);
+      } else if (!requestSent && !wakeWordArmed) {
+        setStatusMessage(lang === "es" ? "No se ha detectado ninguna orden de voz." : "No voice command was detected.");
       }
     };
     recognition.onresult = (event) => {
       const segments = [];
+      let localConfidence = 0;
+      let localConfidenceSamples = 0;
 
       for (let index = event.resultIndex; index < event.results.length; index += 1) {
-        const chunk = event.results[index]?.[0]?.transcript?.trim();
+        const alternative = event.results[index]?.[0];
+        const chunk = alternative?.transcript?.trim();
         if (!chunk) {
           continue;
         }
 
         if (event.results[index].isFinal) {
           segments.push(chunk);
-        } else {
-          partialTranscript = chunk;
+          if (typeof alternative.confidence === "number" && alternative.confidence > 0) {
+            localConfidence += alternative.confidence;
+            localConfidenceSamples += 1;
+          }
         }
       }
 
       if (segments.length) {
-        finalTranscript = `${finalTranscript} ${segments.join(" ")}`.trim();
+        finalTranscript = sharedSanitizeVoiceTranscript(`${finalTranscript} ${segments.join(" ")}`);
+        finalConfidence += localConfidence;
+        finalConfidenceSamples += localConfidenceSamples;
+
+        const averageConfidence =
+          finalConfidenceSamples > 0 ? finalConfidence / finalConfidenceSamples : 0;
+
+        if (submitTranscript(finalTranscript, averageConfidence)) {
+          recognition.stop();
+        }
       }
     };
     recognition.onerror = (event) => {
@@ -2571,7 +2820,6 @@ export function AppProvider({ children }) {
     selectedFilter,
     series,
     setActivityFilter,
-    setActivityItems,
     setDetections,
     signIn,
     signOut,

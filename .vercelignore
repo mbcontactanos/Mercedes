@@ -1,0 +1,9 @@
+.codex-dev.log
+.codex-dev.err.log
+.dockerignore
+Dockerfile
+docker-compose.yml
+docker/
+docs/
+.claude/
+.vscode/

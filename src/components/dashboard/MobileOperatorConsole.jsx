@@ -7,12 +7,15 @@ import {
   ADMIN_HUB_CHANNEL,
   ADMIN_HUB_EVENT,
   ADMIN_HUB_HEARTBEAT_MS,
+  ADMIN_OPERATOR_REQUEST_EVENT,
+  ADMIN_OPERATOR_REQUESTS_CHANNEL,
   APPROVAL_REQUEST_EVENT,
   APPROVAL_REQUESTS_CHANNEL,
   LEGACY_ADMIN_PEER_ID,
   isAdminHubFresh,
 } from "../../config/realtime.js";
 import { insforge } from "../../lib/insforge.js";
+import { createJpegSnapshot } from "../../lib/media-capture.js";
 
 function createDatabaseUuid() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -95,13 +98,63 @@ async function attachPreviewStream(videoElement, stream) {
   }
 }
 
+/**
+ * tuneOutgoingVideo
+ *
+ * Sube la calidad y fluidez del video emitido por WebRTC: prioriza mantener la
+ * resolucion al degradar (mejor para leer piezas pequenas), eleva el bitrate maximo
+ * y fija un frameRate objetivo. Es best-effort; si el navegador no expone
+ * setParameters/RTCRtpSender la emision sigue con los valores por defecto.
+ */
+async function tuneOutgoingVideo(call) {
+  const peerConnection = call?.peerConnection;
+
+  if (!peerConnection?.getSenders) {
+    return;
+  }
+
+  const videoSender = peerConnection.getSenders().find((sender) => sender.track?.kind === "video");
+
+  if (!videoSender?.getParameters) {
+    return;
+  }
+
+  try {
+    const parameters = videoSender.getParameters();
+    parameters.degradationPreference = "maintain-resolution";
+
+    if (!parameters.encodings || !parameters.encodings.length) {
+      parameters.encodings = [{}];
+    }
+
+    parameters.encodings.forEach((encoding) => {
+      encoding.maxBitrate = 2_500_000;
+      encoding.maxFramerate = 30;
+    });
+
+    await videoSender.setParameters(parameters);
+  } catch {
+    // setParameters puede rechazar en algunos navegadores; la emision continua igual.
+  }
+}
+
 async function openMobileCameraStream() {
   const candidates = [
     {
       video: {
         facingMode: { ideal: "environment" },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+        frameRate: { ideal: 30, max: 30 },
+      },
+      audio: false,
+    },
+    {
+      video: {
+        facingMode: { ideal: "environment" },
         width: { ideal: 1280 },
         height: { ideal: 720 },
+        frameRate: { ideal: 30 },
       },
       audio: false,
     },
@@ -189,19 +242,46 @@ export default function ConsolaOperarioMovil({
       }
     };
 
+    const handleRealtimeAdminRequest = (payload) => {
+      if (
+        ignore ||
+        payload?.status !== "pending_user" ||
+        payload?.assigned_operator_id !== activeOperator.id
+      ) {
+        return;
+      }
+
+      setIncomingRequests((currentRequests) => [
+        payload,
+        ...currentRequests.filter((request) => request.id !== payload.id),
+      ]);
+      sileo.info({
+        title: copy.incomingRequest,
+        description: payload.detail,
+      });
+    };
+
+    insforge.realtime.on(ADMIN_OPERATOR_REQUEST_EVENT, handleRealtimeAdminRequest);
+    void insforge.realtime
+      .connect()
+      .then(() => insforge.realtime.subscribe(ADMIN_OPERATOR_REQUESTS_CHANNEL))
+      .catch(() => {});
     void loadPendingRequests();
 
     return () => {
       ignore = true;
+      insforge.realtime.off(ADMIN_OPERATOR_REQUEST_EVENT, handleRealtimeAdminRequest);
     };
-  }, [activeOperator.id]);
+  }, [activeOperator.id, copy.incomingRequest]);
 
   const sendToAdmin = (payload) => {
+    const captureUrl = createJpegSnapshot(previewRef.current);
     const envelope = {
       operatorId: activeOperatorRef.current?.id,
       operatorName: activeOperatorRef.current?.name,
       shift: activeOperatorRef.current?.shift,
       timestamp: Date.now(),
+      captureUrl,
       ...payload,
     };
 
@@ -598,7 +678,7 @@ export default function ConsolaOperarioMovil({
             role: roleKey,
           });
 
-          callsRef.current[adminPeerId] = peer.call(adminPeerId, stream, {
+          const outgoingCall = peer.call(adminPeerId, stream, {
             metadata: {
               operatorId: activeOperator.id,
               operatorName: activeOperator.name,
@@ -606,6 +686,8 @@ export default function ConsolaOperarioMovil({
               role: roleKey,
             },
           });
+          callsRef.current[adminPeerId] = outgoingCall;
+          void tuneOutgoingVideo(outgoingCall);
 
           if (connectedAdmins === 1) {
             heartbeatRef.current = window.setInterval(() => {
@@ -669,6 +751,7 @@ export default function ConsolaOperarioMovil({
             <video
               autoPlay
               className="aspect-[9/14] w-full rounded-[20px] object-cover md:rounded-[24px]"
+              data-operator-selected="true"
               muted
               playsInline
               ref={previewRef}

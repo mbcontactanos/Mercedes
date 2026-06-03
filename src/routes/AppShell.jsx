@@ -67,7 +67,6 @@ export default function AppShell() {
     roleKey,
     searchValue,
     setActivityFilter,
-    setActivityItems,
     signOut,
     theme,
     toggleLang,
@@ -99,7 +98,6 @@ export default function AppShell() {
       notificationsOpen={notificationsOpen}
       pendingRequests={pendingRequests}
       onApproveRequest={handleApproveRequest}
-      onClearHistory={() => setActivityItems([])}
       onCloseNotifications={onCloseNotifications}
       onDenyRequest={handleDenyRequest}
       onFilterActivity={setActivityFilter}

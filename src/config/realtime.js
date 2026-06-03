@@ -6,6 +6,8 @@ export const ADMIN_HUB_HEARTBEAT_MS = 3000;
 export const ADMIN_HUB_STALE_MS = 9000;
 export const APPROVAL_REQUESTS_CHANNEL = "ops:approval-requests";
 export const APPROVAL_REQUEST_EVENT = "approval_request_created";
+export const ADMIN_OPERATOR_REQUESTS_CHANNEL = "ops:admin-operator-requests";
+export const ADMIN_OPERATOR_REQUEST_EVENT = "admin_operator_request_created";
 
 function createPeerSuffix() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {

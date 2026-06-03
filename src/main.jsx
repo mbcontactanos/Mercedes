@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sileo";
 import { AppProvider } from "./context/AppContext.jsx";
 import { useAppContext } from "./context/useAppContext.js";
+import { hasSessionHint } from "./store/sessionStore.js";
 
 // ─── Importación de páginas ──────────────────────────────────────────────────
 // Las carpetas usan nombres en inglés y deben coincidir exactamente con las rutas reales.
@@ -23,15 +24,6 @@ import ProtectedRoute from "./routes/ProtectedRoute.jsx";
 
 // ─── Estilos globales ────────────────────────────────────────────────────────
 import "./index.css";
-
-function hasSessionRecoveryHint() {
-  const hasCsrfCookie = document.cookie.includes("insforge_csrf_token=");
-  const hasLocalAuthHint =
-    window.localStorage.getItem("mercedes-auth-active") === "true" ||
-    window.sessionStorage.getItem("mercedes-auth-active") === "true";
-
-  return hasCsrfCookie || hasLocalAuthHint;
-}
 
 /**
  * registerDynamicManifest
@@ -207,13 +199,13 @@ if ("serviceWorker" in navigator) {
         // Si el usuario permanece en /login más de 12 s con cookie activa,
         // se intenta una recarga automática para recuperar sesión.
         const checkLoginStuck = () => {
-          const hasSessionCookie = hasSessionRecoveryHint();
+          const hasSessionCookie = hasSessionHint();
           
           // Solo aplica si parece haber sesión pero la UI sigue en login.
           if (window.location.pathname === "/login" && hasSessionCookie) {
             loginStuckTimer = setTimeout(() => {
               // Recarga solo si se mantiene en /login y la cookie sigue presente.
-              if (window.location.pathname === "/login" && hasSessionRecoveryHint()) {
+              if (window.location.pathname === "/login" && hasSessionHint()) {
                 window.location.reload();
               }
             }, 12000);
